@@ -8,7 +8,7 @@ def process_charges_data(xls):
         df_charges = pd.read_excel(xls, sheet_name="Charges")
         if not df_charges.empty:
             # Keep only expected columns if they exist
-            cols_to_keep = ['Date', 'Charge', 'Remark']
+            cols_to_keep = ['Date', 'Charge']
             existing_cols = [c for c in cols_to_keep if c in df_charges.columns]
             df_charges = df_charges[existing_cols]
             
@@ -41,10 +41,7 @@ def process_fyers_charges_data(xls):
             if 'Charge' in df_fyers_charges.columns:
                 df_fyers_charges['Charge'] = pd.to_numeric(df_fyers_charges['Charge'], errors='coerce').fillna(0)
             
-            # Fyers charges don't have remark, maybe set it to identify source
-            if 'Remark' not in df_fyers_charges.columns:
-                df_fyers_charges['Remark'] = "Fyers"
-                
+            # Fyers charges processing stripped to Date and Charge
     return df_fyers_charges
 
 def build_charges_dataframe(xls):
@@ -57,8 +54,8 @@ def build_charges_dataframe(xls):
         if 'Date' in final_df.columns:
             final_df = final_df.dropna(subset=['Date'])
         
-        # Ensure we just have the 3 columns expected
-        expected_cols = ['Date', 'Charge', 'Remark']
+        # Ensure we just have the 2 columns expected
+        expected_cols = ['Date', 'Charge']
         for col in expected_cols:
             if col not in final_df.columns:
                 final_df[col] = None
