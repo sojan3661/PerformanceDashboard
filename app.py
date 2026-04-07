@@ -14,6 +14,7 @@ st.markdown("Upload your Trade Details Excel file below. It extracts and merges 
 
 from tradeMaster import build_trademaster
 from chargesMaster import build_charges_dataframe
+from DataProcessing import get_processed_data
 
 uploaded_file = st.file_uploader(
     "Choose a Trade Details Excel file", 
@@ -97,8 +98,35 @@ if uploaded_file is not None:
                 mime='text/csv',
             )
             
+        # Clear the cache whenever a file is uploaded to ensure subsequent UI 
+        # uses the freshest data from the database.
+        get_processed_data.clear()
+            
     except Exception as e:
         import traceback
         st.error(f"An error occurred while processing the file: {e}")
         with st.expander("Show stack trace"):
             st.code(traceback.format_exc())
+
+st.divider()
+st.header("📋 Database Overview (Cached)")
+st.markdown("This section fetches and computes the processed data directly from your database. It automatically updates when you upload new files.")
+
+with st.spinner("Fetching and processing data from database..."):
+    cached_trades, cached_charges = get_processed_data()
+
+col1, col2 = st.tabs(["TradeMaster View", "Charges View"])
+
+with col1:
+    if not cached_trades.empty:
+        st.write(f"**TradeMaster Data ({len(cached_trades)} records)**")
+        st.dataframe(cached_trades, use_container_width=True)
+    else:
+        st.info("No TradeMaster data found in database.")
+
+with col2:
+    if not cached_charges.empty:
+        st.write(f"**Charges Data ({len(cached_charges)} records)**")
+        st.dataframe(cached_charges, use_container_width=True)
+    else:
+        st.info("No Charges data found in database.")

@@ -146,6 +146,10 @@ def save_to_charges(df: pd.DataFrame):
         return 0
 
     records = new_df.copy()
+    
+    # Ensure only Date and Charge are sent to Supabase to match schema
+    ext_keys = [k for k in keys if k in records.columns]
+    records = records[ext_keys]
     if 'Date' in records.columns:
         records['Date'] = pd.to_datetime(records['Date']).dt.strftime('%Y-%m-%d')
         records['Date'] = records['Date'].replace({'NaT': None, 'nan': None})
