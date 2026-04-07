@@ -285,3 +285,4 @@ def build_trademaster(xls):
         # Ensure correct column order again
         trademaster_df = trademaster_df[expected_cols]
     return trademaster_df
+
