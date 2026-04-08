@@ -15,6 +15,7 @@ st.markdown("Upload your Trade Details Excel file below. It extracts and merges 
 from tradeMaster import build_trademaster
 from chargesMaster import build_charges_dataframe
 from DataProcessing import get_processed_data
+from assets.Chart import ChartDrillDown
 
 uploaded_file = st.file_uploader(
     "Choose a Trade Details Excel file", 
@@ -108,25 +109,52 @@ if uploaded_file is not None:
         with st.expander("Show stack trace"):
             st.code(traceback.format_exc())
 
-st.divider()
-st.header("📋 Database Overview (Cached)")
-st.markdown("This section fetches and computes the processed data directly from your database. It automatically updates when you upload new files.")
+# st.divider()
+# st.header("📋 Database Overview (Cached)")
+# st.markdown("This section fetches and computes the processed data directly from your database. It automatically updates when you upload new files.")
 
 with st.spinner("Fetching and processing data from database..."):
     cached_trades, cached_charges = get_processed_data()
 
-col1, col2 = st.tabs(["TradeMaster View", "Charges View"])
+# col1, col2 = st.tabs(["TradeMaster View", "Charges View"])
 
-with col1:
-    if not cached_trades.empty:
-        st.write(f"**TradeMaster Data ({len(cached_trades)} records)**")
-        st.dataframe(cached_trades, use_container_width=True)
-    else:
-        st.info("No TradeMaster data found in database.")
+# with col1:
+#     if not cached_trades.empty:
+#         st.write(f"**TradeMaster Data ({len(cached_trades)} records)**")
+#         st.dataframe(cached_trades, use_container_width=True)
+#     else:
+#         st.info("No TradeMaster data found in database.")
 
-with col2:
-    if not cached_charges.empty:
-        st.write(f"**Charges Data ({len(cached_charges)} records)**")
-        st.dataframe(cached_charges, use_container_width=True)
-    else:
-        st.info("No Charges data found in database.")
+# with col2:
+#     if not cached_charges.empty:
+#         st.write(f"**Charges Data ({len(cached_charges)} records)**")
+#         st.dataframe(cached_charges, use_container_width=True)
+#     else:
+#         st.info("No Charges data found in database.")
+
+st.divider()
+FY_MONTH_ORDER = [
+    "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep",
+    "Oct", "Nov", "Dec",
+    "Jan", "Feb", "Mar"
+]
+ChartDrillDown.drill_down_chart(
+    df=cached_trades,
+    level_config=[
+        {"name": "FY", "group_col": "FY","tooltip": ["P&L"]},
+        {"name": "Quarter", "group_col": "Quarter"},
+        {"name": "Month", "group_col": "Month"},
+        {"name": "Day", "group_col": "Day"},
+        {"name": "Instrument", "group_col": "Instrument"},
+        
+    ],
+    metric_col="P&L",
+    sort_config={
+        "FY": {"type": "label_asc"},
+        "Quarter": {"type": "label_asc"},
+        "Month": {"type": "custom", "order": FY_MONTH_ORDER},
+        "Day": {"type": "asc"},
+    }
+)
+    

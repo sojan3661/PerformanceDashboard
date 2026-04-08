@@ -114,8 +114,8 @@ def get_processed_data():
             if pd.isna(date): return None
             m = date.month
             if m in [4, 5, 6]: return "Q1"
-            elif m in [7, 8]: return "Q2"
-            elif m in [9, 10, 11, 12]: return "Q3"
+            elif m in [7, 8, 9]: return "Q2"
+            elif m in [10, 11, 12]: return "Q3"
             elif m in [1, 2, 3]: return "Q4"
             return None
             
@@ -126,11 +126,16 @@ def get_processed_data():
         trade_df['FY'] = trade_df['ExitedDate'].apply(get_fy)
         trade_df['Quarter'] = trade_df['ExitedDate'].apply(get_quarter)
         trade_df['Month'] = trade_df['ExitedDate'].apply(get_month)
+        trade_df['Day'] = pd.to_datetime(trade_df['ExitedDate']).dt.day
     else:
         trade_df['P&L'] = pd.Series(dtype='float64')
         trade_df['P&L Without Charge'] = pd.Series(dtype='float64')
         trade_df['FY'] = pd.Series(dtype='object')
         trade_df['Quarter'] = pd.Series(dtype='object')
         trade_df['Month'] = pd.Series(dtype='object')
+        trade_df['Day'] = pd.Series(dtype='object')
+    trade_df['Instrument'] = (
+    trade_df['Symbol'] + " " + trade_df['StrikePrice'].fillna('').astype(str)
+).str.strip()
 
     return trade_df, charges_df
