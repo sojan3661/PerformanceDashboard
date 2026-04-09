@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 
 st.set_page_config(
     page_title="My Performance Dashboard",
@@ -9,13 +10,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("File Upload Data")
+st.title("My Performance Dashboard")
+st.divider()
+
+st.header("File Upload Data")
 st.markdown("Upload your Trade Details Excel file below. It extracts and merges data from Fyers, AngelOne, Upstox, and Zerodha sheets into the TradeMaster format.")
 
 from tradeMaster import build_trademaster
 from chargesMaster import build_charges_dataframe
 from DataProcessing import get_processed_data
-from assets.Chart import ChartDrillDown
+from assets.ChartDrillDown import ChartDrillDown
 
 uploaded_file = st.file_uploader(
     "Choose a Trade Details Excel file", 
@@ -157,4 +161,74 @@ ChartDrillDown.drill_down_chart(
         "Day": {"type": "asc"},
     }
 )
+
+st.divider()
+st.header("🏆 Top & Bottom Trades")
+
+col_filter1, col_filter2, col_filter3 = st.columns(3)
+
+with col_filter1:
+    top_n = st.slider("Trades count (n)", min_value=1, max_value=100, value=10)
     
+fy_options = []
+if not cached_trades.empty and 'FY' in cached_trades.columns:
+    fy_options = sorted([str(x) for x in cached_trades['FY'].dropna().unique().tolist()])
+
+segment_options = []
+if not cached_trades.empty and 'Segment' in cached_trades.columns:
+    segment_options = sorted([str(x) for x in cached_trades['Segment'].dropna().unique().tolist()])
+
+with col_filter2:
+    selected_fy = st.multiselect("Filter by FY", options=fy_options, default=fy_options)
+
+with col_filter3:
+    selected_segment = st.multiselect("Filter by Segment", options=segment_options, default=segment_options)
+
+if not cached_trades.empty and "P&L" in cached_trades.columns and "Instrument" in cached_trades.columns:
+    
+    # Apply filters
+    filtered_trades = cached_trades.copy()
+    if 'FY' in filtered_trades.columns and selected_fy:
+        filtered_trades = filtered_trades[filtered_trades['FY'].astype(str).isin(selected_fy)]
+    if 'Segment' in filtered_trades.columns and selected_segment:
+        filtered_trades = filtered_trades[filtered_trades['Segment'].astype(str).isin(selected_segment)]
+        
+    # Use nlargest and nsmallest to get Top and Bottom trades efficiently
+    top_trades = filtered_trades.nlargest(top_n, "P&L").copy()
+    bottom_trades = filtered_trades.nsmallest(top_n, "P&L").copy()
+
+    # Sort values so the best/worst trades appear at the top of their respective charts
+    top_trades = top_trades.sort_values(by="P&L", ascending=True)
+    bottom_trades = bottom_trades.sort_values(by="P&L", ascending=False)
+    
+    # Create unique IDs for the Y-axis to prevent grouping of identical instruments
+    top_trades["Unique_ID"] = top_trades.index.astype(str) + "_" + top_trades["Instrument"].astype(str)
+    bottom_trades["Unique_ID"] = bottom_trades.index.astype(str) + "_" + bottom_trades["Instrument"].astype(str)
+    
+    hover_cols = [col for col in ["Instrument", "P&L", "P&L Without Charge"] if col in cached_trades.columns]
+
+    st.subheader(f"Top {top_n} Trades")
+    fig_top = px.bar(
+        top_trades,
+        x="P&L",
+        y="Unique_ID",
+        orientation='h',
+        hover_data=hover_cols,
+        color_discrete_sequence=['#2e7b32']
+    )
+    fig_top.update_layout(yaxis_title="Instrument", xaxis_title="P&L", showlegend=False)
+    fig_top.update_yaxes(tickmode='array', tickvals=top_trades["Unique_ID"], ticktext=top_trades["Instrument"])
+    st.plotly_chart(fig_top, use_container_width=True)
+
+    st.subheader(f"Bottom {top_n} Trades")
+    fig_bottom = px.bar(
+        bottom_trades,
+        x="P&L",
+        y="Unique_ID",
+        orientation='h',
+        hover_data=hover_cols,
+        color_discrete_sequence=['#c62828']
+    )
+    fig_bottom.update_layout(yaxis_title="Instrument", xaxis_title="P&L", showlegend=False)
+    fig_bottom.update_yaxes(tickmode='array', tickvals=bottom_trades["Unique_ID"], ticktext=bottom_trades["Instrument"])
+    st.plotly_chart(fig_bottom, use_container_width=True)
