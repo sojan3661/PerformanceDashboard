@@ -72,6 +72,13 @@ class ChartGenerator:
         # ---------------------------
         # CREATE BAR CHART
         # ---------------------------
+        hover_data_dict = {"_color": False, x_col: False}
+        if tooltip_cols:
+            for col in tooltip_cols:
+                hover_data_dict[col] = True
+        else:
+            hover_data_dict[y_col] = True
+
         fig = px.bar(
             df,
             x=x_col,
@@ -83,7 +90,7 @@ class ChartGenerator:
                 "Negative": "red"
             },
             category_orders={x_col: category_order_final},
-            hover_data=tooltip_cols
+            hover_data=hover_data_dict
         )
 
         # ---------------------------
@@ -97,17 +104,9 @@ class ChartGenerator:
         # ---------------------------
         # CUSTOM TOOLTIP
         # ---------------------------
-        if tooltip_cols:
-            customdata = df[tooltip_cols].values
-
-            hover_template = "<br>".join(
-                [f"{col}: %{{customdata[{i}]}}" for i, col in enumerate(tooltip_cols)]
-            )
-
-            fig.update_traces(
-                customdata=customdata,
-                hovertemplate=hover_template
-            )
+        for trace in fig.data:
+            if trace.hovertemplate:
+                trace.hovertemplate = trace.hovertemplate.replace("=", ": ")
 
         return fig
 

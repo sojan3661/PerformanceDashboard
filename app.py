@@ -146,7 +146,7 @@ FY_MONTH_ORDER = [
 ChartDrillDown.drill_down_chart(
     df=cached_trades,
     level_config=[
-        {"name": "FY", "group_col": "FY","tooltip": ["P&L"]},
+        {"name": "FY", "group_col": "FY"},
         {"name": "Quarter", "group_col": "Quarter"},
         {"name": "Month", "group_col": "Month"},
         {"name": "Day", "group_col": "Day"},
