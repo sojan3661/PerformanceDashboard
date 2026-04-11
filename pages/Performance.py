@@ -186,9 +186,12 @@ if not cached_trades.empty and "P&L" in cached_trades.columns and "Instrument" i
     if 'Segment' in filtered_trades.columns and selected_segment:
         filtered_trades = filtered_trades[filtered_trades['Segment'].astype(str).isin(selected_segment)]
         
-    # Use nlargest and nsmallest to get Top and Bottom trades efficiently
-    top_trades = filtered_trades.nlargest(top_n, "P&L").copy()
-    bottom_trades = filtered_trades.nsmallest(top_n, "P&L").copy()
+    # Get Top trades (only considering P&L > 0) and Bottom trades (only considering P&L < 0)
+    positive_trades = filtered_trades[filtered_trades["P&L"] > 0]
+    negative_trades = filtered_trades[filtered_trades["P&L"] < 0]
+    
+    top_trades = positive_trades.nlargest(top_n, "P&L").copy()
+    bottom_trades = negative_trades.nsmallest(top_n, "P&L").copy()
 
     # Sort values so the best/worst trades appear at the top of their respective charts
     top_trades = top_trades.sort_values(by="P&L", ascending=True)
