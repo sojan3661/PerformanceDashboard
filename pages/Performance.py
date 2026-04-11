@@ -130,6 +130,24 @@ with st.spinner("Fetching and processing data from database..."):
 #         st.info("No Charges data found in database.")
 
 st.divider()
+
+st.header("📊 Performance Drill Down")
+
+drilldown_segment_options = []
+if not cached_trades.empty and 'Segment' in cached_trades.columns:
+    drilldown_segment_options = sorted([str(x) for x in cached_trades['Segment'].dropna().unique().tolist()])
+
+selected_drilldown_segment = st.multiselect(
+    "Filter by Segment", 
+    options=drilldown_segment_options, 
+    default=drilldown_segment_options,
+    key="drilldown_segment_filter"
+)
+
+drilldown_df = cached_trades.copy()
+if not drilldown_df.empty and 'Segment' in drilldown_df.columns and selected_drilldown_segment:
+    drilldown_df = drilldown_df[drilldown_df['Segment'].astype(str).isin(selected_drilldown_segment)]
+
 FY_MONTH_ORDER = [
     "Apr", "May", "Jun",
     "Jul", "Aug", "Sep",
@@ -137,13 +155,13 @@ FY_MONTH_ORDER = [
     "Jan", "Feb", "Mar"
 ]
 ChartDrillDown.drill_down_chart(
-    df=cached_trades,
+    df=drilldown_df,
     level_config=[
-        {"name": "FY", "group_col": "FY"},
-        {"name": "Quarter", "group_col": "Quarter"},
-        {"name": "Month", "group_col": "Month"},
-        {"name": "Day", "group_col": "Day"},
-        {"name": "Instrument", "group_col": "Instrument"},
+        {"name": "FY", "group_col": "FY", "tooltip": ["P&L", "P&L Without Charge"]},
+        {"name": "Quarter", "group_col": "Quarter", "tooltip": ["P&L", "P&L Without Charge"]},
+        {"name": "Month", "group_col": "Month", "tooltip": ["P&L", "P&L Without Charge"]},
+        {"name": "Day", "group_col": "Day", "tooltip": ["P&L", "P&L Without Charge"]},
+        {"name": "Instrument", "group_col": "Instrument", "tooltip": ["P&L", "P&L Without Charge"]},
         
     ],
     metric_col="P&L",

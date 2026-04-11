@@ -229,7 +229,10 @@ class ChartDrillDown:
 
         for col in tooltip_cols:
             if col != metric_col and col in filtered_df.columns:
-                agg_dict[col] = "first"
+                if pd.api.types.is_numeric_dtype(filtered_df[col]):
+                    agg_dict[col] = "sum"
+                else:
+                    agg_dict[col] = "first"
 
         summary = (
             filtered_df

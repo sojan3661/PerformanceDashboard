@@ -94,9 +94,9 @@ def process_angelone_data(xls):
                 df_fo = df_fo.drop(columns=['Segment'])
                 
             if 'Option Type' in df_fo.columns:
-                df_fo['Segment'] = df_fo['Option Type'].apply(lambda x: "Options" if pd.notna(x) and str(x).strip() != "" else "Futures")
+                df_fo['Segment'] = df_fo['Option Type'].apply(lambda x: "Options" if pd.notna(x) and str(x).strip() != "" else "Equity & Mutual Fund")
             else:
-                df_fo['Segment'] = "Futures"
+                df_fo['Segment'] = "Equity & Mutual Fund"
                 
             if 'Strike Price' in df_fo.columns and 'Option Type' in df_fo.columns:
                 strike_str = df_fo['Strike Price'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -163,7 +163,7 @@ def process_upstox_data(xls):
         elif so in ["CE", "PE"]:
             return "Options"
         else:
-            return "Futures"
+            return "Equity & Mutual Fund"
     
     final_df['Segment'] = final_df.apply(get_segment, axis=1)
     
