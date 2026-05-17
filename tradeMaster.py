@@ -19,11 +19,6 @@ def process_fyers_data(xls):
 
     df_combined = pd.concat([df_eq, df_eq1], ignore_index=True)
     if not df_combined.empty:
-        if 'Txn Type' in df_combined.columns:
-            df_combined = df_combined.drop(columns=['Txn Type'])
-        if 'Segment' in df_combined.columns:
-            df_combined = df_combined.drop(columns=['Segment'])
-        df_combined['Segment'] = 'Equity & Mutual Fund'
         df_combined['StrikePrice'] = None
         
     if "Fyers - Options" in sheet_names:
@@ -39,15 +34,32 @@ def process_fyers_data(xls):
             df_fo['StrikePrice'] = split_df[2].fillna('').astype(str) + " " + split_df[3].fillna('').astype(str)
             df_fo['StrikePrice'] = df_fo['StrikePrice'].str.strip()
                 
-            if 'Segment' in df_fo.columns:
-                df_fo = df_fo.drop(columns=['Segment'])
-            if 'Txn Type' in df_fo.columns:
-                df_fo = df_fo.rename(columns={'Txn Type': 'Segment'})
-                
+            # Do not drop or rename Txn Type or Segment here, we do it in final_df
     final_df = pd.concat([df_combined, df_fo], ignore_index=True)
     if final_df.empty:
         return pd.DataFrame()
         
+    if 'Segment' not in final_df.columns:
+        final_df['Segment'] = ''
+        
+    segment_mapping = {
+        'NSE-FNO': 'Options',
+        'NSE-Cash': 'Equity',
+        'BSE-Cash': 'Equity',
+        'BSE-MF': 'Mutual Fund'
+    }
+    final_df['Segment'] = final_df['Segment'].replace(segment_mapping)
+    
+    def apply_segment_rule(row):
+        seg = str(row.get('Segment', '')).strip()
+        txn = str(row.get('Txn Type', '')).strip()
+        
+        if seg.lower() in ['equity', 'mutual fund']:
+            return 'Equity & Mutual Fund'
+        else:
+            return txn if txn else seg
+            
+    final_df['Segment'] = final_df.apply(apply_segment_rule, axis=1)
     if 'Buy Date' in final_df.columns and 'Sell Date' in final_df.columns:
         final_df['Buy Date'] = pd.to_datetime(final_df['Buy Date'], errors='coerce')
         final_df['Sell Date'] = pd.to_datetime(final_df['Sell Date'], errors='coerce')
@@ -57,10 +69,16 @@ def process_fyers_data(xls):
         final_df['EnteredDate'] = None
         final_df['ExitedDate'] = None
         
-    rename_dict = {'Sell Qty': 'Qty', 'Buy Rate (₹)': 'BuyRate', 'Sell Rate (₹)': 'SellRate'}
+    rename_dict = {'Buy Rate (₹)': 'BuyRate', 'Sell Rate (₹)': 'SellRate'}
+    if 'Qty' not in final_df.columns:
+        if 'Sell Qty' in final_df.columns:
+            rename_dict['Sell Qty'] = 'Qty'
+        elif 'Buy Qty' in final_df.columns:
+            rename_dict['Buy Qty'] = 'Qty'
+            
     final_df = final_df.rename(columns=rename_dict)
     
-    cols_to_remove = ['Buy Date', 'Sell Date', 'Buy Qty', 'Buy Value (₹)', 'Sell Value (₹)', 'P&L Amt (₹)', 'Total days', 'ISIN', 'Turnover (₹)', 'Txn Type']
+    cols_to_remove = ['Buy Date', 'Sell Date', 'Buy Qty', 'Sell Qty', 'Buy Value (₹)', 'Sell Value (₹)', 'P&L Amt (₹)', 'Total days', 'ISIN', 'Turnover (₹)', 'Txn Type']
     final_df = final_df.drop(columns=[c for c in cols_to_remove if c in final_df.columns])
     return final_df
 

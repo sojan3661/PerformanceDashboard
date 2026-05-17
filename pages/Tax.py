@@ -31,7 +31,7 @@ def get_tax_segment(row):
     
     if segment in ['Options', 'Futures']:
         return 'Trading'
-    elif segment == 'Equity & Mutual Fund':
+    elif segment in ['Equity & Mutual Fund', 'Equity', 'Mutual fund']:
         if pd.isna(days):
             return 'Short Term'
         if days > 365:
