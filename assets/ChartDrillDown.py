@@ -98,7 +98,8 @@ class ChartGenerator:
         # ---------------------------
         fig.update_layout(
             showlegend=False,             # hide Positive/Negative legend
-            yaxis=dict(fixedrange=False)  # enable zoom
+            yaxis=dict(fixedrange=False), # enable zoom
+            xaxis=dict(type='category')   # force X-axis to categorical to avoid decimal ticks
         )
 
         # ---------------------------
@@ -203,7 +204,23 @@ class ChartDrillDown:
         for i in range(current_level):
             col = level_config[i]["group_col"]
             val = st.session_state[f"{key_prefix}_level_{i}"]
-            filtered_df = filtered_df[filtered_df[col] == val]
+            
+            # Type-safe filter comparison
+            col_series = filtered_df[col]
+            if pd.api.types.is_integer_dtype(col_series):
+                try:
+                    val = int(float(val))
+                except (ValueError, TypeError):
+                    pass
+                filtered_df = filtered_df[col_series == val]
+            elif pd.api.types.is_float_dtype(col_series):
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    pass
+                filtered_df = filtered_df[col_series == val]
+            else:
+                filtered_df = filtered_df[col_series.astype(str) == str(val)]
 
         # ---------------------------
         # BACK NAVIGATION

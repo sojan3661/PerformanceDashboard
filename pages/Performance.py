@@ -145,8 +145,16 @@ selected_drilldown_segment = st.multiselect(
 )
 
 drilldown_df = cached_trades.copy()
+if not drilldown_df.empty:
+    exit_date_col = 'ExitedDate' if 'ExitedDate' in drilldown_df.columns else 'exiteddate'
+    if exit_date_col in drilldown_df.columns:
+        drilldown_df['Week'] = pd.to_datetime(drilldown_df[exit_date_col]).dt.isocalendar().week
+else:
+    drilldown_df['Week'] = pd.Series(dtype='int32')
+
 if not drilldown_df.empty and 'Segment' in drilldown_df.columns and selected_drilldown_segment:
     drilldown_df = drilldown_df[drilldown_df['Segment'].astype(str).isin(selected_drilldown_segment)]
+
 
 FY_MONTH_ORDER = [
     "Apr", "May", "Jun",
@@ -160,6 +168,7 @@ ChartDrillDown.drill_down_chart(
         {"name": "FY", "group_col": "FY", "tooltip": ["P&L", "P&L Without Charge"]},
         {"name": "Quarter", "group_col": "Quarter", "tooltip": ["P&L", "P&L Without Charge"]},
         {"name": "Month", "group_col": "Month", "tooltip": ["P&L", "P&L Without Charge"]},
+        {"name": "Week", "group_col": "Week", "tooltip": ["P&L", "P&L Without Charge"]},
         {"name": "Day", "group_col": "Day", "tooltip": ["P&L", "P&L Without Charge"]},
         {"name": "Instrument", "group_col": "Instrument", "tooltip": ["P&L", "P&L Without Charge"]},
         
@@ -169,7 +178,8 @@ ChartDrillDown.drill_down_chart(
         "FY": {"type": "label_asc"},
         "Quarter": {"type": "label_asc"},
         "Month": {"type": "custom", "order": FY_MONTH_ORDER},
-        "Day": {"type": "asc"},
+        "Week": {"type": "label_asc"},
+        "Day": {"type": "label_asc"},
     }
 )
 
