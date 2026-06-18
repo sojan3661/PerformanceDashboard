@@ -247,6 +247,7 @@ if not cached_trades.empty and "P&L" in cached_trades.columns and "Instrument" i
         fig_top.update_yaxes(tickmode='array', tickvals=top_trades["Unique_ID"], ticktext=top_trades["Instrument"])
         st.plotly_chart(fig_top, use_container_width=True)
 
+
     with col_bottom:
         st.subheader(f"Bottom {top_n} Trades")
         fig_bottom = px.bar(
@@ -260,3 +261,50 @@ if not cached_trades.empty and "P&L" in cached_trades.columns and "Instrument" i
         fig_bottom.update_layout(yaxis_title="Instrument", xaxis_title="P&L", showlegend=False)
         fig_bottom.update_yaxes(tickmode='array', tickvals=bottom_trades["Unique_ID"], ticktext=bottom_trades["Instrument"])
         st.plotly_chart(fig_bottom, use_container_width=True)
+
+    # ---------------------------
+    # SYMBOL PERFORMANCE
+    # ---------------------------
+    st.divider()
+    st.header("📈 Symbol Performance")
+
+    if not filtered_trades.empty:
+        # Clean up Symbol column to ensure casing and whitespace consistency
+        trades_for_symbol = filtered_trades.copy()
+        trades_for_symbol["Symbol"] = trades_for_symbol["Symbol"].astype(str).str.strip().str.upper()
+        
+        # Group by Symbol and sum P&L
+        symbol_perf = trades_for_symbol.groupby("Symbol", as_index=False)["P&L"].sum()
+        
+        # Sort values so higher values are at the top of the chart
+        symbol_perf = symbol_perf.sort_values(by="P&L", ascending=True)
+        
+        # Add conditional coloring column
+        symbol_perf["Color"] = symbol_perf["P&L"].apply(lambda x: "Positive" if x >= 0 else "Negative")
+        
+        fig_symbol = px.bar(
+            symbol_perf,
+            x="P&L",
+            y="Symbol",
+            orientation='h',
+            color="Color",
+            color_discrete_map={
+                "Positive": "#2e7b32",  # Green
+                "Negative": "#c62828"   # Red
+            },
+            hover_data={"Symbol": True, "P&L": ":.2f", "Color": False}
+        )
+        
+        # Responsive height based on number of symbols to prevent overlapping labels
+        chart_height = max(400, len(symbol_perf) * 25)
+        
+        fig_symbol.update_layout(
+            yaxis_title="Symbol",
+            xaxis_title="P&L",
+            showlegend=False,
+            height=chart_height
+        )
+        
+        st.plotly_chart(fig_symbol, use_container_width=True)
+    else:
+        st.info("No trade data available for the selected filters.")
