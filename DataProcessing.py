@@ -32,6 +32,25 @@ def get_processed_data():
     """
     Fetches all data from database, enriches it, and caches the result for the session.
     """
+    def get_fy(date):
+        if pd.isna(date): return None
+        # April 1 to March 31
+        y = date.year
+        return f"{y}-{y+1}" if date.month >= 4 else f"{y-1}-{y}"
+        
+    def get_quarter(date):
+        if pd.isna(date): return None
+        m = date.month
+        if m in [4, 5, 6]: return "Q1"
+        elif m in [7, 8, 9]: return "Q2"
+        elif m in [10, 11, 12]: return "Q3"
+        elif m in [1, 2, 3]: return "Q4"
+        return None
+        
+    def get_month(date):
+        if pd.isna(date): return None
+        return date.strftime('%B')
+
     trade_df = _fetch_all_from_table("TradeMaster")
     charges_df = _fetch_all_from_table("Charges")
     
@@ -60,6 +79,10 @@ def get_processed_data():
             
         charges_df['Charge'] = pd.to_numeric(charges_df.get('Charge', 0), errors='coerce').fillna(0)
         
+        charges_df['FY'] = charges_df['Date'].apply(get_fy)
+        charges_df['Quarter'] = charges_df['Date'].apply(get_quarter)
+        charges_df['Month'] = charges_df['Date'].apply(get_month)
+        
         charges_df['EnteredTradeCount'] = 0
         charges_df['ExitedTradeCount'] = 0
         charges_df['TotalTradeCount'] = 0
@@ -83,7 +106,7 @@ def get_processed_data():
                     else:
                         charges_df.at[idx, 'PerTradeCharge'] = 0.0
     else:
-        charges_df = pd.DataFrame(columns=['Date', 'Charge', 'EnteredTradeCount', 'ExitedTradeCount', 'TotalTradeCount', 'PerTradeCharge'])
+        charges_df = pd.DataFrame(columns=['Date', 'Charge', 'EnteredTradeCount', 'ExitedTradeCount', 'TotalTradeCount', 'PerTradeCharge', 'FY', 'Quarter', 'Month'])
 
     # Map PerTradeCharge back to TradeMaster
     if not trade_df.empty and not charges_df.empty:
@@ -104,25 +127,6 @@ def get_processed_data():
         trade_df['P&L'] = trade_df['Sell Value'] - trade_df['Buy Value'] - trade_df['EnteredTradeCharges'] - trade_df['ExitedTradeCharges']
         trade_df['P&L Without Charge'] = trade_df['Sell Value'] - trade_df['Buy Value']
         
-        def get_fy(date):
-            if pd.isna(date): return None
-            # April 1 to March 31
-            y = date.year
-            return f"{y}-{y+1}" if date.month >= 4 else f"{y-1}-{y}"
-            
-        def get_quarter(date):
-            if pd.isna(date): return None
-            m = date.month
-            if m in [4, 5, 6]: return "Q1"
-            elif m in [7, 8, 9]: return "Q2"
-            elif m in [10, 11, 12]: return "Q3"
-            elif m in [1, 2, 3]: return "Q4"
-            return None
-            
-        def get_month(date):
-            if pd.isna(date): return None
-            return date.strftime('%b')
-            
         trade_df['FY'] = trade_df['ExitedDate'].apply(get_fy)
         trade_df['Quarter'] = trade_df['ExitedDate'].apply(get_quarter)
         trade_df['Month'] = trade_df['ExitedDate'].apply(get_month)
@@ -135,7 +139,7 @@ def get_processed_data():
         trade_df['Month'] = pd.Series(dtype='object')
         trade_df['Day'] = pd.Series(dtype='object')
     trade_df['Instrument'] = (
-    trade_df['Symbol'] + " " + trade_df['StrikePrice'].fillna('').astype(str)
-).str.strip()
+        trade_df['Symbol'] + " " + trade_df['StrikePrice'].fillna('').astype(str)
+    ).str.strip()
 
     return trade_df, charges_df

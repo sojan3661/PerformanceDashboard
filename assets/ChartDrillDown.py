@@ -111,6 +111,74 @@ class ChartGenerator:
 
         return fig
 
+    @staticmethod
+    def create_line_chart(
+        df: pd.DataFrame,
+        x_col: str,
+        y_col: str,
+        title: str = "",
+        tooltip_cols: list = None,
+        category_order: list = None
+    ):
+        """
+        Creates a Plotly line chart with markers.
+
+        Args:
+            df (pd.DataFrame): Input dataframe (already aggregated).
+            x_col (str): Column name for X-axis (categorical).
+            y_col (str): Column name for Y-axis (numeric).
+            title (str, optional): Chart title.
+            tooltip_cols (list, optional): Columns to display in tooltip.
+            category_order (list, optional): Custom order for X-axis categories.
+
+        Returns:
+            plotly.graph_objects.Figure: Configured Plotly line chart.
+        """
+        df = df.copy()
+
+        if category_order:
+            df[x_col] = df[x_col].astype(str)
+            cat_list = [str(c) for c in category_order]
+            df[x_col] = pd.Categorical(df[x_col], categories=cat_list, ordered=True)
+            df = df.sort_values(by=x_col)
+            category_order_final = cat_list
+        else:
+            category_order_final = df[x_col].tolist()
+
+        hover_data_dict = {x_col: False}
+        if tooltip_cols:
+            for col in tooltip_cols:
+                hover_data_dict[col] = True
+        else:
+            hover_data_dict[y_col] = True
+
+        fig = px.line(
+            df,
+            x=x_col,
+            y=y_col,
+            title=title,
+            category_orders={x_col: category_order_final},
+            hover_data=hover_data_dict,
+            markers=True
+        )
+
+        fig.update_traces(
+            line=dict(color='#6366F1', width=3),
+            marker=dict(size=8, color='#4F46E5', symbol='circle')
+        )
+
+        fig.update_layout(
+            showlegend=False,
+            yaxis=dict(fixedrange=False),
+            xaxis=dict(type='category')
+        )
+
+        for trace in fig.data:
+            if trace.hovertemplate:
+                trace.hovertemplate = trace.hovertemplate.replace("=", ": ")
+
+        return fig
+
 
 class ChartDrillDown:
     """
@@ -341,4 +409,190 @@ class ChartDrillDown:
                 data=csv,
                 file_name=f"{config['name']}_data.csv",
                 mime="text/csv"
+            )
+
+    @staticmethod
+    def drill_down_line_chart(
+        df: pd.DataFrame,
+        level_config: list,
+        key_prefix: str = "line_chart",
+        enable_download: bool = True,
+        metric_col: str = "Charge",
+        sort_config: dict = None
+    ):
+        """
+        Renders a drill-down interactive line chart.
+
+        Args:
+            df (pd.DataFrame): Source dataset.
+            level_config (list[dict]): Defines hierarchy levels.
+            key_prefix (str, optional): Unique identifier for session state.
+            enable_download (bool, optional): Enables CSV download button.
+            metric_col (str, optional): Numeric column used for aggregation.
+            sort_config (dict, optional): Sorting rules per level.
+        """
+        # ---------------------------
+        # INITIALIZE SESSION STATE
+        # ---------------------------
+        for i in range(len(level_config)):
+            key = f"{key_prefix}_level_{i}"
+            if key not in st.session_state:
+                st.session_state[key] = None
+
+        # ---------------------------
+        # DETERMINE CURRENT LEVEL
+        # ---------------------------
+        current_level = 0
+        for i in range(len(level_config)):
+            if st.session_state[f"{key_prefix}_level_{i}"] is None:
+                current_level = i
+                break
+        else:
+            current_level = len(level_config) - 1
+
+        # ---------------------------
+        # APPLY FILTERS BASED ON SELECTION
+        # ---------------------------
+        filtered_df = df.copy()
+        for i in range(current_level):
+            col = level_config[i]["group_col"]
+            val = st.session_state[f"{key_prefix}_level_{i}"]
+            
+            col_series = filtered_df[col]
+            if pd.api.types.is_integer_dtype(col_series):
+                try:
+                    val = int(float(val))
+                except (ValueError, TypeError):
+                    pass
+                filtered_df = filtered_df[col_series == val]
+            elif pd.api.types.is_float_dtype(col_series):
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    pass
+                filtered_df = filtered_df[col_series == val]
+            else:
+                filtered_df = filtered_df[col_series.astype(str) == str(val)]
+
+        # ---------------------------
+        # BACK NAVIGATION
+        # ---------------------------
+        if current_level > 0:
+            if st.button("⬅️ Back", key=f"{key_prefix}_back_btn"):
+                st.session_state[f"{key_prefix}_level_{current_level-1}"] = None
+                st.rerun()
+
+        # ---------------------------
+        # CURRENT LEVEL CONFIG
+        # ---------------------------
+        is_final = current_level == len(level_config) - 1
+        config = level_config[current_level]
+        group_col = config["group_col"]
+
+        # ---------------------------
+        # AGGREGATION
+        # ---------------------------
+        agg_dict = {metric_col: "sum"}
+        tooltip_cols = config.get("tooltip", [metric_col])
+
+        for col in tooltip_cols:
+            if col != metric_col and col in filtered_df.columns:
+                if pd.api.types.is_numeric_dtype(filtered_df[col]):
+                    agg_dict[col] = "sum"
+                else:
+                    agg_dict[col] = "first"
+
+        summary = (
+            filtered_df
+            .groupby(group_col, as_index=False)
+            .agg(agg_dict)
+        )
+
+        summary[metric_col] = summary[metric_col].round(2)
+
+        # ---------------------------
+        # SORTING LOGIC
+        # ---------------------------
+        category_order = None
+
+        if sort_config and group_col in sort_config:
+            sconf = sort_config[group_col]
+            stype = sconf.get("type")
+
+            if stype == "custom":
+                category_order = sconf.get("order")
+            elif stype in ["asc", "desc"]:
+                summary = summary.sort_values(
+                    by=metric_col,
+                    ascending=(stype == "asc")
+                )
+            elif stype in ["label_asc", "label_desc"]:
+                summary = summary.sort_values(
+                    by=group_col,
+                    ascending=(stype == "label_asc")
+                )
+
+        # For line charts, if not sorted by anything specific, default sorting by label (chronological/sequential order) is preferred
+        if not category_order and (not sort_config or group_col not in sort_config):
+            summary = summary.sort_values(by=group_col, ascending=True)
+
+        # ---------------------------
+        # GENERATE CHART
+        # ---------------------------
+        fig = ChartGenerator.create_line_chart(
+            summary,
+            x_col=group_col,
+            y_col=metric_col,
+            title=f"{config['name']} View" + (" (Final)" if is_final else ""),
+            tooltip_cols=tooltip_cols,
+            category_order=category_order
+        )
+
+        # ---------------------------
+        # DISPLAY CHART
+        # ---------------------------
+        event = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key=f"{key_prefix}_{current_level}"
+        )
+
+        # ---------------------------
+        # STOP AT FINAL LEVEL
+        # ---------------------------
+        if is_final:
+            st.info("Final level reached - no further drill-down")
+            return
+
+        # ---------------------------
+        # HANDLE CLICK EVENT
+        # ---------------------------
+        selected = None
+        points = []
+
+        if event and hasattr(event, "selection"):
+            points = getattr(event.selection, "points", [])
+        elif isinstance(event, dict):
+            points = event.get("selection", {}).get("points", [])
+
+        if points:
+            selected = points[0].get("x")
+
+        if selected:
+            st.session_state[f"{key_prefix}_level_{current_level}"] = selected
+            st.rerun()
+
+        # ---------------------------
+        # DOWNLOAD OPTION
+        # ---------------------------
+        if enable_download:
+            csv = filtered_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="⬇️ Download Data",
+                data=csv,
+                file_name=f"{config['name']}_data.csv",
+                mime="text/csv",
+                key=f"{key_prefix}_download_btn"
             )

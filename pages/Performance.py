@@ -157,10 +157,10 @@ if not drilldown_df.empty and 'Segment' in drilldown_df.columns and selected_dri
 
 
 FY_MONTH_ORDER = [
-    "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep",
-    "Oct", "Nov", "Dec",
-    "Jan", "Feb", "Mar"
+    "April", "May", "June",
+    "July", "August", "September",
+    "October", "November", "December",
+    "January", "February", "March"
 ]
 ChartDrillDown.drill_down_chart(
     df=drilldown_df,
@@ -182,6 +182,27 @@ ChartDrillDown.drill_down_chart(
         "Day": {"type": "label_asc"},
     }
 )
+
+st.divider()
+
+st.header("📉 Charges Drill Down")
+
+if not cached_charges.empty:
+    ChartDrillDown.drill_down_line_chart(
+        df=cached_charges,
+        level_config=[
+            {"name": "FY", "group_col": "FY", "tooltip": ["Charge"]},
+            {"name": "Month", "group_col": "Month", "tooltip": ["Charge"]},
+        ],
+        key_prefix="charges_chart",
+        metric_col="Charge",
+        sort_config={
+            "FY": {"type": "label_asc"},
+            "Month": {"type": "custom", "order": FY_MONTH_ORDER},
+        }
+    )
+else:
+    st.info("No charges data available in database.")
 
 st.divider()
 st.header("🏆 Top & Bottom Trades")
