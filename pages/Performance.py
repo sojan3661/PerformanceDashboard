@@ -193,12 +193,14 @@ if not cached_charges.empty:
         level_config=[
             {"name": "FY", "group_col": "FY", "tooltip": ["Charge"]},
             {"name": "Month", "group_col": "Month", "tooltip": ["Charge"]},
+            {"name": "Day", "group_col": "Day", "tooltip": ["Charge"]},
         ],
         key_prefix="charges_chart",
         metric_col="Charge",
         sort_config={
             "FY": {"type": "label_asc"},
             "Month": {"type": "custom", "order": FY_MONTH_ORDER},
+            "Day": {"type": "label_asc"},
         }
     )
 else:

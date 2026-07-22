@@ -82,6 +82,7 @@ def get_processed_data():
         charges_df['FY'] = charges_df['Date'].apply(get_fy)
         charges_df['Quarter'] = charges_df['Date'].apply(get_quarter)
         charges_df['Month'] = charges_df['Date'].apply(get_month)
+        charges_df['Day'] = pd.to_datetime(charges_df['Date']).dt.day
         
         charges_df['EnteredTradeCount'] = 0
         charges_df['ExitedTradeCount'] = 0
@@ -106,7 +107,7 @@ def get_processed_data():
                     else:
                         charges_df.at[idx, 'PerTradeCharge'] = 0.0
     else:
-        charges_df = pd.DataFrame(columns=['Date', 'Charge', 'EnteredTradeCount', 'ExitedTradeCount', 'TotalTradeCount', 'PerTradeCharge', 'FY', 'Quarter', 'Month'])
+        charges_df = pd.DataFrame(columns=['Date', 'Charge', 'EnteredTradeCount', 'ExitedTradeCount', 'TotalTradeCount', 'PerTradeCharge', 'FY', 'Quarter', 'Month', 'Day'])
 
     # Map PerTradeCharge back to TradeMaster
     if not trade_df.empty and not charges_df.empty:
