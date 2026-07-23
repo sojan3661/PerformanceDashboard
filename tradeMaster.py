@@ -1,5 +1,28 @@
 import pandas as pd
 import numpy as np
+import re
+
+def _find_sheet(sheet_names, patterns):
+    """
+    Finds a sheet name in sheet_names matching any pattern in patterns.
+    Matches case-insensitively and ignores leading/trailing whitespace.
+    """
+    for pattern in patterns:
+        compiled = re.compile(pattern, re.IGNORECASE)
+        for s in sheet_names:
+            if compiled.search(s.strip()):
+                return s
+    return None
+
+def _clean_symbol(val):
+    if pd.isna(val): return None
+    s = str(val).strip().upper()
+    return s if s not in ['', 'NAN', 'NONE', '<NA>'] else None
+
+def _clean_strikeprice(val):
+    if pd.isna(val): return None
+    s = str(val).strip().upper()
+    return s if s not in ['', 'NAN', 'NONE', '<NA>'] else None
 
 def process_fyers_data(xls):
     sheet_names = xls.sheet_names
@@ -8,13 +31,15 @@ def process_fyers_data(xls):
     df_fo = pd.DataFrame()
     df_comm = pd.DataFrame()
 
-    if "Fyers - EQ " in sheet_names:
-        df_eq = pd.read_excel(xls, sheet_name="Fyers - EQ ")
+    eq_sheet = _find_sheet(sheet_names, [r'^fyers\s*-\s*eq\b(?!.*short)'])
+    if eq_sheet:
+        df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
         if 'Symbol' in df_eq.columns:
             df_eq = df_eq.dropna(subset=['Symbol'])
 
-    if "Fyers - EQ ShortTerm Trading" in sheet_names:
-        df_eq1 = pd.read_excel(xls, sheet_name="Fyers - EQ ShortTerm Trading")
+    short_sheet = _find_sheet(sheet_names, [r'fyers.*short.*term', r'fyers.*eq.*short'])
+    if short_sheet:
+        df_eq1 = pd.read_excel(xls, sheet_name=short_sheet)
         if 'Symbol' in df_eq1.columns:
             df_eq1 = df_eq1.dropna(subset=['Symbol'])
 
@@ -22,14 +47,14 @@ def process_fyers_data(xls):
     if not df_combined.empty:
         df_combined['StrikePrice'] = None
 
-    if "Fyers - Options" in sheet_names:
-        df_fo = pd.read_excel(xls, sheet_name="Fyers - Options")
+    options_sheet = _find_sheet(sheet_names, [r'fyers.*option', r'fyers.*fo'])
+    if options_sheet:
+        df_fo = pd.read_excel(xls, sheet_name=options_sheet)
 
-    if "Fyers-Commodiy" in sheet_names:
-        df_comm = pd.read_excel(xls, sheet_name="Fyers-Commodiy")
+    comm_sheet = _find_sheet(sheet_names, [r'fyers.*commodi'])
+    if comm_sheet:
+        df_comm = pd.read_excel(xls, sheet_name=comm_sheet)
         if not df_comm.empty:
-            # Align Commodity sheet column names with the Options sheet so both
-            # can be run through the same Symbol/StrikePrice parsing logic below.
             rename_comm = {
                 'Name': 'Symbol',
                 'Txn type': 'Txn Type',
@@ -44,9 +69,6 @@ def process_fyers_data(xls):
             }
             df_comm = df_comm.rename(columns=rename_comm)
 
-    # Combine Options + Commodity rows before the shared Symbol/StrikePrice parsing,
-    # since Commodity symbols follow the same "NAME ddMMMyyyy STRIKE CE/PE" pattern
-    # (and plain "NAME ddMMMyyyy" for futures).
     df_fo = pd.concat([df_fo, df_comm], ignore_index=True)
 
     if not df_fo.empty and 'Symbol' in df_fo.columns:
@@ -60,7 +82,6 @@ def process_fyers_data(xls):
         df_fo['StrikePrice'] = split_df[2].fillna('').astype(str) + " " + split_df[3].fillna('').astype(str)
         df_fo['StrikePrice'] = df_fo['StrikePrice'].str.strip()
 
-        # Do not drop or rename Txn Type or Segment here, we do it in final_df
     final_df = pd.concat([df_combined, df_fo], ignore_index=True)
     if final_df.empty:
         return pd.DataFrame()
@@ -115,8 +136,9 @@ def process_angelone_data(xls):
     df_eq = pd.DataFrame()
     df_fo = pd.DataFrame()
 
-    if "AngelOne - EQ" in sheet_names:
-        df_eq = pd.read_excel(xls, sheet_name="AngelOne - EQ")
+    eq_sheet = _find_sheet(sheet_names, [r'angel.*eq', r'angel.*equity'])
+    if eq_sheet:
+        df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
         if not df_eq.empty:
             if 'Scrip Name' in df_eq.columns:
                 df_eq = df_eq.rename(columns={'Scrip Name': 'Symbol'})
@@ -130,11 +152,14 @@ def process_angelone_data(xls):
             df_eq = df_eq.drop(columns=[c for c in cols_to_drop_eq if c in df_eq.columns])
             df_eq['StrikePrice'] = None
 
-    if "AngelOne - FO" in sheet_names:
-        df_fo = pd.read_excel(xls, sheet_name="AngelOne - FO")
+    fo_sheet = _find_sheet(sheet_names, [r'angel.*fo', r'angel.*f&o', r'angel.*option'])
+    if fo_sheet:
+        df_fo = pd.read_excel(xls, sheet_name=fo_sheet)
         if not df_fo.empty:
             if 'Symbol Name' in df_fo.columns:
                 df_fo = df_fo.rename(columns={'Symbol Name': 'Symbol'})
+            elif 'Scrip Name' in df_fo.columns:
+                df_fo = df_fo.rename(columns={'Scrip Name': 'Symbol'})
 
             if 'Segment' in df_fo.columns:
                 df_fo = df_fo.drop(columns=['Segment'])
@@ -146,7 +171,6 @@ def process_angelone_data(xls):
 
             if 'Strike Price' in df_fo.columns and 'Option Type' in df_fo.columns:
                 strike_str = df_fo['Strike Price'].astype(str).str.replace(r'\.0$', '', regex=True)
-                # replace 'nan' literal with empty string just in case
                 strike_str = strike_str.replace('nan', '')
                 opt_type = df_fo['Option Type'].fillna('').astype(str)
                 df_fo['StrikePrice'] = strike_str + " " + opt_type
@@ -177,11 +201,13 @@ def process_upstox_data(xls):
     df_eq = pd.DataFrame()
     df_fo = pd.DataFrame()
 
-    if "Upstox - EQ" in sheet_names:
-        df_eq = pd.read_excel(xls, sheet_name="Upstox - EQ")
+    eq_sheet = _find_sheet(sheet_names, [r'upstox.*eq', r'upstox.*equity'])
+    if eq_sheet:
+        df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
 
-    if "Upstox - Options" in sheet_names:
-        df_fo = pd.read_excel(xls, sheet_name="Upstox - Options")
+    fo_sheet = _find_sheet(sheet_names, [r'upstox.*option', r'upstox.*fo', r'upstox.*f&o'])
+    if fo_sheet:
+        df_fo = pd.read_excel(xls, sheet_name=fo_sheet)
 
     final_df = pd.concat([df_eq, df_fo], ignore_index=True)
 
@@ -245,8 +271,9 @@ def process_zerodha_data(xls):
     df_eq = pd.DataFrame()
     df_mf = pd.DataFrame()
 
-    if "Zerodha" in sheet_names:
-        df_eq = pd.read_excel(xls, sheet_name="Zerodha")
+    eq_sheet = _find_sheet(sheet_names, [r'^zerodha\b(?!.*mf)', r'zerodha.*eq', r'zerodha.*equity'])
+    if eq_sheet:
+        df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
         if not df_eq.empty:
             df_eq['Segment'] = 'Equity & Mutual Fund'
 
@@ -262,8 +289,9 @@ def process_zerodha_data(xls):
             df_eq = df_eq.drop(columns=[c for c in cols_to_drop if c in df_eq.columns])
             df_eq['StrikePrice'] = None
 
-    if "Zerodha - MF" in sheet_names:
-        df_mf = pd.read_excel(xls, sheet_name="Zerodha - MF")
+    mf_sheet = _find_sheet(sheet_names, [r'zerodha.*mf', r'zerodha.*mutual'])
+    if mf_sheet:
+        df_mf = pd.read_excel(xls, sheet_name=mf_sheet)
         if not df_mf.empty:
             df_mf['Segment'] = 'Equity & Mutual Fund'
 
@@ -300,6 +328,10 @@ def build_trademaster(xls):
 
         trademaster_df = trademaster_df[expected_cols]
 
+        # Clean Symbol and StrikePrice
+        trademaster_df['Symbol'] = trademaster_df['Symbol'].apply(_clean_symbol)
+        trademaster_df['StrikePrice'] = trademaster_df['StrikePrice'].apply(_clean_strikeprice)
+
         # Convert to numeric for grouping calculations
         trademaster_df['Qty'] = pd.to_numeric(trademaster_df['Qty'], errors='coerce').fillna(0)
         trademaster_df['BuyRate'] = pd.to_numeric(trademaster_df['BuyRate'], errors='coerce').fillna(0)
@@ -327,6 +359,10 @@ def build_trademaster(xls):
 
         # Restore NA values
         trademaster_df[groupby_cols] = trademaster_df[groupby_cols].replace('__MISSING__', None)
+
+        # Re-clean Symbol and StrikePrice after grouping
+        trademaster_df['Symbol'] = trademaster_df['Symbol'].apply(_clean_symbol)
+        trademaster_df['StrikePrice'] = trademaster_df['StrikePrice'].apply(_clean_strikeprice)
 
         # Ensure correct column order again
         trademaster_df = trademaster_df[expected_cols]

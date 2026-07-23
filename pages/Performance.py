@@ -35,14 +35,20 @@ if uploaded_file is not None:
             st.write(f"### Processed TradeMaster Data ({len(trademaster_df)} records)")
             
             # Save to Database
-            with st.spinner('Checking database for duplicates and saving new records...'):
+            with st.spinner('Checking database for duplicates and saving new/updated records...'):
                 try:
                     from config.db import save_to_trademaster
-                    inserted_count = save_to_trademaster(trademaster_df)
+                    res_tm = save_to_trademaster(trademaster_df)
+                    inserted_count, updated_count = res_tm if isinstance(res_tm, tuple) else (res_tm, 0)
+                    msg_parts = []
                     if inserted_count > 0:
-                        st.success(f"Successfully added {inserted_count} new records to the TradeMaster database!")
+                        msg_parts.append(f"added {inserted_count} new record(s)")
+                    if updated_count > 0:
+                        msg_parts.append(f"updated {updated_count} existing record(s)")
+                    if msg_parts:
+                        st.success(f"Successfully {' and '.join(msg_parts)} in the TradeMaster database!")
                     else:
-                        st.info("No new records to add. All trades in this document were already in the database.")
+                        st.info("No new or updated records to add. All trades in this document were already up-to-date in the database.")
                 except Exception as db_e:
                     st.error(f"Failed to connect and save to Supabase: {db_e}. Please make sure you have added your Supabase URL and Key in `.streamlit/secrets.toml`!")
             
@@ -71,14 +77,20 @@ if uploaded_file is not None:
             st.write(f"### Processed Charges Data ({len(charges_df)} records)")
             
             # Save to Database for Charges
-            with st.spinner('Checking database for duplicate charges and saving new records...'):
+            with st.spinner('Checking database for duplicate charges and saving new/updated records...'):
                 try:
                     from config.db import save_to_charges
-                    inserted_charges = save_to_charges(charges_df)
+                    res_chg = save_to_charges(charges_df)
+                    inserted_charges, updated_charges = res_chg if isinstance(res_chg, tuple) else (res_chg, 0)
+                    chg_parts = []
                     if inserted_charges > 0:
-                        st.success(f"Successfully added {inserted_charges} new records to the Charges database!")
+                        chg_parts.append(f"added {inserted_charges} new record(s)")
+                    if updated_charges > 0:
+                        chg_parts.append(f"updated {updated_charges} existing record(s)")
+                    if chg_parts:
+                        st.success(f"Successfully {' and '.join(chg_parts)} in the Charges database!")
                     else:
-                        st.info("No new charges to add. All charges were already in the database.")
+                        st.info("No new or updated charges to add. All charges were already up-to-date in the database.")
                 except Exception as db_e:
                     st.error(f"Failed to connect and save to Supabase: {db_e}. Please verify your database connection string!")
             
