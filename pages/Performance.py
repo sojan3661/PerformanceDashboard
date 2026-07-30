@@ -174,26 +174,42 @@ FY_MONTH_ORDER = [
     "October", "November", "December",
     "January", "February", "March"
 ]
-ChartDrillDown.drill_down_chart(
-    df=drilldown_df,
-    level_config=[
-        {"name": "FY", "group_col": "FY", "tooltip": ["P&L", "P&L Without Charge"]},
-        {"name": "Quarter", "group_col": "Quarter", "tooltip": ["P&L", "P&L Without Charge"]},
-        {"name": "Month", "group_col": "Month", "tooltip": ["P&L", "P&L Without Charge"]},
-        {"name": "Week", "group_col": "Week", "tooltip": ["P&L", "P&L Without Charge"]},
-        {"name": "Day", "group_col": "Day", "tooltip": ["P&L", "P&L Without Charge"]},
-        {"name": "Instrument", "group_col": "Instrument", "tooltip": ["P&L", "P&L Without Charge"]},
-        
-    ],
-    metric_col="P&L",
-    sort_config={
-        "FY": {"type": "label_asc"},
-        "Quarter": {"type": "label_asc"},
-        "Month": {"type": "custom", "order": FY_MONTH_ORDER},
-        "Week": {"type": "label_asc"},
-        "Day": {"type": "label_asc"},
-    }
-)
+
+col_toggle1, col_toggle2 = st.columns([2, 1])
+with col_toggle1:
+    view_mode = st.radio(
+        "View Mode",
+        options=["📊 Drill Down Chart", "📅 Calendar View"],
+        horizontal=True,
+        key="performance_view_toggle"
+    )
+
+if view_mode == "📊 Drill Down Chart":
+    ChartDrillDown.drill_down_chart(
+        df=drilldown_df,
+        level_config=[
+            {"name": "FY", "group_col": "FY", "tooltip": ["P&L", "P&L Without Charge"]},
+            {"name": "Quarter", "group_col": "Quarter", "tooltip": ["P&L", "P&L Without Charge"]},
+            {"name": "Month", "group_col": "Month", "tooltip": ["P&L", "P&L Without Charge"]},
+            {"name": "Week", "group_col": "Week", "tooltip": ["P&L", "P&L Without Charge"]},
+            {"name": "Day", "group_col": "Day", "tooltip": ["P&L", "P&L Without Charge"]},
+            {"name": "Instrument", "group_col": "Instrument", "tooltip": ["P&L", "P&L Without Charge"]},
+            
+        ],
+        metric_col="P&L",
+        sort_config={
+            "FY": {"type": "label_asc"},
+            "Quarter": {"type": "label_asc"},
+            "Month": {"type": "custom", "order": FY_MONTH_ORDER},
+            "Week": {"type": "label_asc"},
+            "Day": {"type": "label_asc"},
+        }
+    )
+else:
+    ChartDrillDown.drill_down_calendar_view(
+        df=drilldown_df,
+        key_prefix="perf_calendar"
+    )
 
 st.divider()
 
