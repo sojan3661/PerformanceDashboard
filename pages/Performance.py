@@ -208,6 +208,7 @@ if view_mode == "📊 Drill Down Chart":
 else:
     ChartDrillDown.drill_down_calendar_view(
         df=drilldown_df,
+        charges_df=cached_charges,
         key_prefix="perf_calendar"
     )
 

@@ -600,62 +600,98 @@ class ChartDrillDown:
     @staticmethod
     def drill_down_calendar_view(
         df: pd.DataFrame,
+        charges_df: pd.DataFrame = None,
         key_prefix: str = "calendar_view",
         enable_download: bool = True
     ):
         """
-        Renders a Calendar View for trading performance.
+        Renders a Calendar View for trading performance with Net P&L Post Charges.
         
         Features:
-        - FY Selector buttons with total P&L and green/red conditional styling.
+        - FY Selector buttons with total Net P&L Post Charges (Green if >= 0, Red if < 0).
         - Month-by-month calendar grid for the selected Financial Year (April - March).
-        - Color-coded daily P&L (Green for P&L > 0, Red for P&L < 0).
-        - Detailed trade drill-down for selected dates.
+        - Color-coded daily Net P&L Post Charges (Green for Net P&L > 0, Red for Net P&L < 0).
+        - Detailed tooltip showing Net P&L, Gross P&L, and Charges per day.
         """
         import calendar
 
-        if df.empty:
-            st.info("No trade data available for the Calendar View.")
+        if df.empty and (charges_df is None or charges_df.empty):
+            st.info("No trade or charges data available for the Calendar View.")
             return
 
-        df_cal = df.copy()
+        # Process trade dataset
+        df_cal = df.copy() if not df.empty else pd.DataFrame()
 
-        # Determine date column
-        date_col = None
-        for col in ['ExitedDate', 'exiteddate', 'Date', 'date', 'EnteredDate', 'entereddate']:
-            if col in df_cal.columns:
-                date_col = col
-                break
+        # Date column for realized trades (ExitedDate)
+        date_col = 'ExitedDate' if 'ExitedDate' in df_cal.columns else ('exiteddate' if 'exiteddate' in df_cal.columns else ('Date' if 'Date' in df_cal.columns else 'date'))
 
-        if not date_col:
-            st.error("No date column found in dataset for Calendar View.")
-            return
+        if not df_cal.empty and date_col in df_cal.columns:
+            df_cal['CleanDate'] = pd.to_datetime(df_cal[date_col], errors='coerce').dt.date
+            df_cal = df_cal.dropna(subset=['CleanDate'])
 
-        df_cal['CleanDate'] = pd.to_datetime(df_cal[date_col], errors='coerce').dt.date
-        df_cal = df_cal.dropna(subset=['CleanDate'])
-
-        if df_cal.empty:
-            st.info("No valid dates found in dataset.")
-            return
-
-        # Ensure FY column exists
+        # Helper to calculate FY
         def calc_fy(d):
             if pd.isna(d): return None
             y = d.year
             return f"{y}-{y+1}" if d.month >= 4 else f"{y-1}-{y}"
 
-        if 'FY' not in df_cal.columns or df_cal['FY'].isna().all():
-            df_cal['FY'] = df_cal['CleanDate'].apply(calc_fy)
-        else:
-            df_cal['FY'] = df_cal['FY'].astype(str)
+        if not df_cal.empty:
+            if 'FY' not in df_cal.columns or df_cal['FY'].isna().all():
+                df_cal['FY'] = df_cal['CleanDate'].apply(calc_fy)
+            else:
+                df_cal['FY'] = df_cal['FY'].astype(str)
 
-        # Calculate FY summary P&L
-        fy_summary = df_cal.groupby('FY')['P&L'].sum().to_dict()
-        fy_list = sorted([str(x) for x in fy_summary.keys()])
+            if 'P&L Without Charge' in df_cal.columns:
+                df_cal['Gross_PNL'] = df_cal['P&L Without Charge']
+            else:
+                df_cal['Gross_PNL'] = df_cal['P&L']
+
+            # Trade level total charges (EnteredTradeCharges + ExitedTradeCharges)
+            entered_chg = df_cal['EnteredTradeCharges'] if ('EnteredTradeCharges' in df_cal.columns) else 0.0
+            exited_chg = df_cal['ExitedTradeCharges'] if ('ExitedTradeCharges' in df_cal.columns) else 0.0
+            df_cal['Trade_Charges'] = entered_chg + exited_chg
+            df_cal['Net_PNL'] = df_cal['P&L']  # Sell Value - Buy Value - EnteredTradeCharges - ExitedTradeCharges
+
+        # Standalone charges from charges_df (charges on dates where no trades entered or exited)
+        standalone_chg = pd.DataFrame()
+        if charges_df is not None and not charges_df.empty:
+            c_df = charges_df.copy()
+            c_date_col = 'Date' if 'Date' in c_df.columns else ('date' if 'date' in c_df.columns else None)
+            if c_date_col:
+                c_df['CleanDate'] = pd.to_datetime(c_df[c_date_col], errors='coerce').dt.date
+                c_df = c_df.dropna(subset=['CleanDate'])
+                c_df['Charge'] = pd.to_numeric(c_df.get('Charge', 0), errors='coerce').fillna(0)
+                c_df['FY'] = c_df['CleanDate'].apply(calc_fy)
+                
+                # Standalone charges where no trades entered or exited
+                if 'TotalTradeCount' in c_df.columns:
+                    standalone_chg = c_df[c_df['TotalTradeCount'] == 0].copy()
+                elif 'EnteredTradeCount' in c_df.columns and 'ExitedTradeCount' in c_df.columns:
+                    standalone_chg = c_df[(c_df['EnteredTradeCount'] == 0) & (c_df['ExitedTradeCount'] == 0)].copy()
+
+        # Combine FY list from trades and standalone charges
+        fy_set = set()
+        if not df_cal.empty and 'FY' in df_cal.columns:
+            fy_set.update(df_cal['FY'].dropna().unique())
+        if not standalone_chg.empty and 'FY' in standalone_chg.columns:
+            fy_set.update(standalone_chg['FY'].dropna().unique())
+        
+        fy_list = sorted([str(x) for x in fy_set if x])
 
         if not fy_list:
             st.info("No Financial Year data found.")
             return
+
+        # Pre-compute net P&L post charges per FY for FY buttons
+        fy_summary = {}
+        for fy_val in fy_list:
+            fy_trades = df_cal[df_cal['FY'] == fy_val] if not df_cal.empty else pd.DataFrame()
+            fy_st_chg = standalone_chg[standalone_chg['FY'] == fy_val] if not standalone_chg.empty else pd.DataFrame()
+            
+            trade_net = fy_trades['Net_PNL'].sum() if not fy_trades.empty else 0.0
+            st_chg_sum = fy_st_chg['Charge'].sum() if not fy_st_chg.empty else 0.0
+            
+            fy_summary[fy_val] = trade_net - st_chg_sum
 
         # Initialize session state for selected FY
         selected_fy_key = f"{key_prefix}_selected_fy"
@@ -664,16 +700,31 @@ class ChartDrillDown:
 
         selected_fy = st.session_state[selected_fy_key]
 
-        # Inject CSS for FY Buttons
+        # Inject CSS for FY Buttons, Metrics, and Instant Day Tooltips
         st.markdown("""
         <style>
+        div[data-testid="stMetricLabel"] p {
+            font-size: 0.78rem !important;
+            font-weight: 600 !important;
+        }
+
+        div[data-testid="stMetricValue"] div {
+            font-size: 1.1rem !important;
+            font-weight: 700 !important;
+        }
+
+        div[data-testid="stMetricDelta"] div {
+            font-size: 0.75rem !important;
+        }
+
         div[data-testid="stButton"] button[key*="_fy_pos_"] {
             background-color: rgba(46, 125, 50, 0.12) !important;
             color: #2e7b32 !important;
             border: 2px solid #2e7b32 !important;
             font-weight: 700 !important;
-            border-radius: 10px !important;
-            padding: 0.6rem 0.8rem !important;
+            font-size: 11.5px !important;
+            border-radius: 8px !important;
+            padding: 0.4rem 0.5rem !important;
             transition: all 0.2s ease-in-out !important;
             width: 100% !important;
         }
@@ -689,8 +740,9 @@ class ChartDrillDown:
             color: #c62828 !important;
             border: 2px solid #c62828 !important;
             font-weight: 700 !important;
-            border-radius: 10px !important;
-            padding: 0.6rem 0.8rem !important;
+            font-size: 11.5px !important;
+            border-radius: 8px !important;
+            padding: 0.4rem 0.5rem !important;
             transition: all 0.2s ease-in-out !important;
             width: 100% !important;
         }
@@ -706,10 +758,53 @@ class ChartDrillDown:
             box-shadow: 0 0 12px rgba(99, 102, 241, 0.6) !important;
             transform: scale(1.02) !important;
         }
+
+        /* Instant Day Cell Popover Tooltip */
+        .cal-day-cell {
+            position: relative !important;
+            cursor: pointer !important;
+            overflow: visible !important;
+        }
+
+        .cal-day-cell[data-tooltip]:hover::after {
+            content: attr(data-tooltip) !important;
+            position: absolute !important;
+            bottom: 112% !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            background-color: #11111b !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.25) !important;
+            padding: 6px 10px !important;
+            border-radius: 8px !important;
+            font-size: 11px !important;
+            font-weight: 500 !important;
+            line-height: 1.4 !important;
+            white-space: pre-line !important;
+            z-index: 999999 !important;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6) !important;
+            pointer-events: none !important;
+            width: max-content !important;
+            min-width: 140px !important;
+            text-align: left !important;
+        }
+
+        .cal-day-cell[data-tooltip]:hover::before {
+            content: '' !important;
+            position: absolute !important;
+            bottom: 100% !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            border-width: 5px !important;
+            border-style: solid !important;
+            border-color: #11111b transparent transparent transparent !important;
+            z-index: 999999 !important;
+            pointer-events: none !important;
+        }
         </style>
         """, unsafe_allow_html=True)
 
-        st.markdown("##### 🗓️ Financial Year Selection")
+        st.markdown("##### 🗓️ Financial Year Selection (P&L Post Charges)")
 
         # Display FY buttons
         cols = st.columns(min(len(fy_list), 6))
@@ -732,29 +827,25 @@ class ChartDrillDown:
                     st.session_state[selected_fy_key] = fy_val
                     st.rerun()
 
-        # Filter dataset for selected FY
-        fy_df = df_cal[df_cal['FY'] == selected_fy].copy()
+        # Filter trade and standalone charge data for selected FY
+        fy_df = df_cal[df_cal['FY'] == selected_fy].copy() if not df_cal.empty else pd.DataFrame()
+        fy_st = standalone_chg[standalone_chg['FY'] == selected_fy].copy() if not standalone_chg.empty else pd.DataFrame()
 
-        # Key Metrics Banner for Selected FY
-        st.markdown("---")
-        total_pnl = fy_df['P&L'].sum() if not fy_df.empty else 0.0
-        daily_pnl_series = fy_df.groupby('CleanDate')['P&L'].sum() if not fy_df.empty else pd.Series(dtype=float)
-        trading_days = len(daily_pnl_series)
-        win_days = (daily_pnl_series > 0).sum()
-        loss_days = (daily_pnl_series < 0).sum()
-        win_rate = (win_days / trading_days * 100) if trading_days > 0 else 0.0
-        max_gain = daily_pnl_series.max() if trading_days > 0 else 0.0
-        max_loss = daily_pnl_series.min() if trading_days > 0 else 0.0
+        trade_gross_map = fy_df.groupby('CleanDate')['Gross_PNL'].sum().to_dict() if not fy_df.empty else {}
+        trade_chg_map = fy_df.groupby('CleanDate')['Trade_Charges'].sum().to_dict() if not fy_df.empty else {}
+        st_chg_map = fy_st.groupby('CleanDate')['Charge'].sum().to_dict() if not fy_st.empty else {}
 
-        mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-        with mcol1:
-            st.metric("Total FY P&L", f"₹{total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
-        with mcol2:
-            st.metric("Traded Days", f"{trading_days} Days", delta=f"{win_days} W / {loss_days} L ({win_rate:.1f}%)")
-        with mcol3:
-            st.metric("Best Day", f"₹{max_gain:,.2f}")
-        with mcol4:
-            st.metric("Worst Day", f"₹{max_loss:,.2f}")
+        all_fy_dates = set(trade_gross_map.keys()).union(set(st_chg_map.keys()))
+        daily_net_map = {}
+        daily_gross_map = {}
+        daily_charge_map = {}
+
+        for d in all_fy_dates:
+            g = trade_gross_map.get(d, 0.0)
+            c = trade_chg_map.get(d, 0.0) + st_chg_map.get(d, 0.0)
+            daily_gross_map[d] = g
+            daily_charge_map[d] = c
+            daily_net_map[d] = g - c
 
         # Parse Start & End Year from selected_fy (e.g. "2023-2024" or "2023-24")
         parts = str(selected_fy).split('-')
@@ -766,7 +857,7 @@ class ChartDrillDown:
             else:
                 end_year = start_year + 1
         except Exception:
-            min_year = fy_df['CleanDate'].min().year if not fy_df.empty else 2024
+            min_year = min([d.year for d in all_fy_dates]) if all_fy_dates else 2024
             start_year = min_year
             end_year = min_year + 1
 
@@ -786,10 +877,8 @@ class ChartDrillDown:
             ("March", 3, end_year)
         ]
 
-        # Map daily P&L
-        daily_pnl_map = daily_pnl_series.to_dict()
-
         # Month Filter Tabs / Selectbox
+        st.markdown("---")
         month_options = ["All 12 Months"] + [m[0] for m in fy_months]
         selected_month_view = st.selectbox(
             "Filter Calendar by Month",
@@ -797,25 +886,75 @@ class ChartDrillDown:
             key=f"{key_prefix}_month_select"
         )
 
+        # Filter active dates by selected month
+        if selected_month_view == "All 12 Months":
+            active_dates = all_fy_dates
+            header_scope = f"Full FY Overview ({selected_fy})"
+        else:
+            target_m = next((m for m in fy_months if m[0] == selected_month_view), None)
+            if target_m:
+                active_dates = {d for d in all_fy_dates if d.month == target_m[1] and d.year == target_m[2]}
+            else:
+                active_dates = all_fy_dates
+            header_scope = f"{selected_month_view} Overview ({selected_fy})"
+
+        # Dynamic Metric Banner Calculations for selected scope
+        total_net_pnl = sum([daily_net_map[d] for d in active_dates]) if active_dates else 0.0
+        total_gross_pnl = sum([daily_gross_map[d] for d in active_dates]) if active_dates else 0.0
+        total_charges = sum([daily_charge_map[d] for d in active_dates]) if active_dates else 0.0
+
+        traded_dates_list = [d for d in active_dates if (daily_gross_map.get(d, 0) != 0 or daily_charge_map.get(d, 0) != 0)]
+        trading_days = len(traded_dates_list)
+        
+        win_pnls = [daily_net_map[d] for d in traded_dates_list if daily_net_map[d] > 0]
+        loss_pnls = [daily_net_map[d] for d in traded_dates_list if daily_net_map[d] < 0]
+        
+        win_days = len(win_pnls)
+        loss_days = len(loss_pnls)
+        win_rate = (win_days / trading_days * 100) if trading_days > 0 else 0.0
+        
+        avg_win = (sum(win_pnls) / win_days) if win_days > 0 else 0.0
+        avg_loss = (sum(loss_pnls) / loss_days) if loss_days > 0 else 0.0
+        
+        max_gain = max([daily_net_map[d] for d in active_dates]) if active_dates else 0.0
+        max_loss = min([daily_net_map[d] for d in active_dates]) if active_dates else 0.0
+
+        # Display Metrics Banner
+        st.markdown(f"###### 📊 Performance Metrics — {header_scope}")
+        mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
+        with mcol1:
+            st.metric("Net P&L (Post Charges)", f"₹{total_net_pnl:,.2f}", delta=f"{total_net_pnl:,.2f}")
+        with mcol2:
+            st.metric("Total Charges", f"₹{total_charges:,.2f}")
+        with mcol3:
+            st.metric("Gross P&L", f"₹{total_gross_pnl:,.2f}")
+        with mcol4:
+            st.metric("Traded Days", f"{trading_days} Days", delta=f"{win_days} W / {loss_days} L ({win_rate:.1f}%)")
+        with mcol5:
+            loss_str = f"-₹{abs(avg_loss):,.0f}" if avg_loss != 0 else "₹0"
+            st.metric("Avg Win / Loss", f"+₹{avg_win:,.0f} / {loss_str}", delta=f"Win: +₹{avg_win:,.0f} | Loss: {loss_str}")
+        with mcol6:
+            st.metric("Best / Worst Day", f"₹{max_gain:,.0f} / ₹{max_loss:,.0f}")
+
         def render_month_card(month_name, month_num, year, cell_height="46px"):
             cal = calendar.monthcalendar(year, month_num)
             headers = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
             
             month_dates = [pd.to_datetime(f"{year}-{month_num:02d}-{day:02d}").date() for week in cal for day in week if day != 0]
-            month_pnl = sum([daily_pnl_map.get(d, 0.0) for d in month_dates])
+            month_pnl = sum([daily_net_map.get(d, 0.0) for d in month_dates if d in daily_net_map])
             
             badge_html = ""
             if month_pnl > 0:
-                badge_html = f'<span style="color: #2e7d32; font-size: 13px; font-weight: bold; margin-left: 6px;">(+₹{month_pnl:,.2f})</span>'
+                badge_html = f'<span style="color: #2e7d32; font-size: 11.5px; font-weight: bold; margin-left: 5px;">(+₹{month_pnl:,.2f})</span>'
             elif month_pnl < 0:
-                badge_html = f'<span style="color: #c62828; font-size: 13px; font-weight: bold; margin-left: 6px;">(-₹{abs(month_pnl):,.2f})</span>'
+                badge_html = f'<span style="color: #c62828; font-size: 11.5px; font-weight: bold; margin-left: 5px;">(-₹{abs(month_pnl):,.2f})</span>'
             
             html_lines = []
-            html_lines.append('<div style="background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 12px; margin-bottom: 16px; font-family: system-ui, -apple-system, sans-serif;">')
-            html_lines.append(f'<div style="font-size: 15px; font-weight: 700; color: #e0e0e0; text-align: center; margin-bottom: 10px; display: flex; align-items: center; justify-content: center;">')
+            html_lines.append('<div style="background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 10px; margin-bottom: 14px; font-family: system-ui, -apple-system, sans-serif;">')
+            html_lines.append(f'<div style="font-size: 13.5px; font-weight: 700; color: #e0e0e0; text-align: center; margin-bottom: 8px; display: flex; align-items: center; justify-content: center;">')
             html_lines.append(f'<span>{month_name} {year}</span> {badge_html}')
             html_lines.append('</div>')
-            html_lines.append('<div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; font-size: 11px; font-weight: 600; color: #9e9e9e; margin-bottom: 6px;">')
+            html_lines.append('<div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; font-size: 10px; font-weight: 600; color: #9e9e9e; margin-bottom: 5px;">')
             for h in headers:
                 html_lines.append(f'<div>{h}</div>')
             html_lines.append('</div>')
@@ -827,9 +966,11 @@ class ChartDrillDown:
                         html_lines.append(f'<div style="height: {cell_height}; background: transparent;"></div>')
                     else:
                         date_obj = pd.to_datetime(f"{year}-{month_num:02d}-{day:02d}").date()
-                        pnl = daily_pnl_map.get(date_obj, None)
+                        pnl = daily_net_map.get(date_obj, None)
+                        gross_val = daily_gross_map.get(date_obj, 0.0)
+                        chg_val = daily_charge_map.get(date_obj, 0.0)
                         
-                        if pnl is not None:
+                        if pnl is not None and (gross_val != 0 or chg_val != 0):
                             if pnl > 0:
                                 bg_color = "#1b5e20" # Green
                                 border_color = "#2e7b32"
@@ -846,13 +987,20 @@ class ChartDrillDown:
                                 text_color = "#e0e0e0"
                                 pnl_str = "₹0"
                             
-                            html_lines.append(f'<div style="height: {cell_height}; background-color: {bg_color}; border: 1px solid {border_color}; color: {text_color}; border-radius: 8px; padding: 4px 2px; font-size: 11px; display: flex; flex-direction: column; justify-content: center; align-items: center;" title="{date_obj}: Realized P&L = ₹{pnl:,.2f}">')
-                            html_lines.append(f'<div style="font-weight: 700; font-size: 12px;">{day}</div>')
-                            html_lines.append(f'<div style="font-size: 10px; font-weight: 600; opacity: 0.95;">{pnl_str}</div>')
+                            date_title = date_obj.strftime('%d %b %Y')
+                            net_sign = "+" if pnl > 0 else ("-" if pnl < 0 else "")
+                            gross_sign = "+" if gross_val > 0 else ("-" if gross_val < 0 else "")
+                            
+                            tooltip_clean = f"{date_title}\nGross P&L: {gross_sign}₹{abs(gross_val):,.2f}\nCharges: ₹{chg_val:,.2f}\nNet P&L: {net_sign}₹{abs(pnl):,.2f}"
+                            title_text = f"{date_title}&#10;Gross P&L: {gross_sign}₹{abs(gross_val):,.2f}&#10;Charges: ₹{chg_val:,.2f}&#10;Net P&L: {net_sign}₹{abs(pnl):,.2f}"
+                            
+                            html_lines.append(f'<div class="cal-day-cell" data-tooltip="{tooltip_clean}" title="{title_text}" style="height: {cell_height}; background-color: {bg_color}; border: 1px solid {border_color}; color: {text_color}; border-radius: 6px; padding: 3px 2px; font-size: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center;">')
+                            html_lines.append(f'<div style="font-weight: 700; font-size: 11px;">{day}</div>')
+                            html_lines.append(f'<div style="font-size: 9.5px; font-weight: 600; opacity: 0.95;">{pnl_str}</div>')
                             html_lines.append('</div>')
                         else:
-                            html_lines.append(f'<div style="height: {cell_height}; background-color: rgba(255, 255, 255, 0.02); color: #757575; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.04); padding: 4px 2px; font-size: 11px; display: flex; flex-direction: column; justify-content: center; align-items: center;">')
-                            html_lines.append(f'<div style="font-weight: 400; font-size: 11px;">{day}</div>')
+                            html_lines.append(f'<div style="height: {cell_height}; background-color: rgba(255, 255, 255, 0.02); color: #757575; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04); padding: 3px 2px; font-size: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center;">')
+                            html_lines.append(f'<div style="font-weight: 400; font-size: 10px;">{day}</div>')
                             html_lines.append('</div>')
             html_lines.append('</div></div>')
             return "".join(html_lines)
@@ -877,10 +1025,8 @@ class ChartDrillDown:
                 else:
                     st.markdown(render_month_card(target_month[0], target_month[1], target_month[2], "60px"), unsafe_allow_html=True)
 
-
-
         if enable_download:
-            csv = fy_df.to_csv(index=False).encode("utf-8")
+            csv = fy_df.to_csv(index=False).encode("utf-8") if not fy_df.empty else "".encode("utf-8")
             st.download_button(
                 label=f"⬇️ Download {selected_fy} Data",
                 data=csv,
