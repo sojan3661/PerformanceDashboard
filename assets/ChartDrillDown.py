@@ -906,6 +906,21 @@ class ChartDrillDown:
         traded_dates_list = [d for d in active_dates if (daily_gross_map.get(d, 0) != 0 or daily_charge_map.get(d, 0) != 0)]
         trading_days = len(traded_dates_list)
         
+        # Trades statistics for active dates
+        active_trades_df = fy_df[fy_df['CleanDate'].isin(active_dates)] if not fy_df.empty else pd.DataFrame()
+        total_trades_taken = len(active_trades_df)
+        
+        if not active_trades_df.empty:
+            win_trades = len(active_trades_df[active_trades_df['Net_PNL'] > 0])
+            loss_trades = len(active_trades_df[active_trades_df['Net_PNL'] < 0])
+            trade_win_rate = (win_trades / total_trades_taken * 100) if total_trades_taken > 0 else 0.0
+        else:
+            win_trades = 0
+            loss_trades = 0
+            trade_win_rate = 0.0
+
+        daily_trade_count_map = active_trades_df.groupby('CleanDate').size().to_dict() if not active_trades_df.empty else {}
+        
         win_pnls = [daily_net_map[d] for d in traded_dates_list if daily_net_map[d] > 0]
         loss_pnls = [daily_net_map[d] for d in traded_dates_list if daily_net_map[d] < 0]
         
@@ -921,7 +936,7 @@ class ChartDrillDown:
 
         # Display Metrics Banner
         st.markdown(f"###### 📊 Performance Metrics — {header_scope}")
-        mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
+        mcol1, mcol2, mcol3, mcol4, mcol5, mcol6, mcol7 = st.columns(7)
         with mcol1:
             st.metric("Net P&L (Post Charges)", f"₹{total_net_pnl:,.2f}", delta=f"{total_net_pnl:,.2f}")
         with mcol2:
@@ -931,9 +946,11 @@ class ChartDrillDown:
         with mcol4:
             st.metric("Traded Days", f"{trading_days} Days", delta=f"{win_days} W / {loss_days} L ({win_rate:.1f}%)")
         with mcol5:
+            st.metric("Trades Taken", f"{total_trades_taken}", delta=f"{win_trades} W / {loss_trades} L ({trade_win_rate:.1f}%)")
+        with mcol6:
             loss_str = f"-₹{abs(avg_loss):,.0f}" if avg_loss != 0 else "₹0"
             st.metric("Avg Win / Loss", f"+₹{avg_win:,.0f} / {loss_str}", delta=f"Win: +₹{avg_win:,.0f} | Loss: {loss_str}")
-        with mcol6:
+        with mcol7:
             st.metric("Best / Worst Day", f"₹{max_gain:,.0f} / ₹{max_loss:,.0f}")
 
         def render_month_card(month_name, month_num, year, cell_height="46px"):
@@ -969,6 +986,7 @@ class ChartDrillDown:
                         pnl = daily_net_map.get(date_obj, None)
                         gross_val = daily_gross_map.get(date_obj, 0.0)
                         chg_val = daily_charge_map.get(date_obj, 0.0)
+                        trade_cnt = daily_trade_count_map.get(date_obj, 0)
                         
                         if pnl is not None and (gross_val != 0 or chg_val != 0):
                             if pnl > 0:
@@ -991,8 +1009,11 @@ class ChartDrillDown:
                             net_sign = "+" if pnl > 0 else ("-" if pnl < 0 else "")
                             gross_sign = "+" if gross_val > 0 else ("-" if gross_val < 0 else "")
                             
-                            tooltip_clean = f"{date_title}\nGross P&L: {gross_sign}₹{abs(gross_val):,.2f}\nCharges: ₹{chg_val:,.2f}\nNet P&L: {net_sign}₹{abs(pnl):,.2f}"
-                            title_text = f"{date_title}&#10;Gross P&L: {gross_sign}₹{abs(gross_val):,.2f}&#10;Charges: ₹{chg_val:,.2f}&#10;Net P&L: {net_sign}₹{abs(pnl):,.2f}"
+                            trades_line = f"Trades Taken: {trade_cnt}\n" if trade_cnt > 0 else ""
+                            trades_title_line = f"Trades Taken: {trade_cnt}&#10;" if trade_cnt > 0 else ""
+
+                            tooltip_clean = f"{date_title}\n{trades_line}Gross P&L: {gross_sign}₹{abs(gross_val):,.2f}\nCharges: ₹{chg_val:,.2f}\nNet P&L: {net_sign}₹{abs(pnl):,.2f}"
+                            title_text = f"{date_title}&#10;{trades_title_line}Gross P&L: {gross_sign}₹{abs(gross_val):,.2f}&#10;Charges: ₹{chg_val:,.2f}&#10;Net P&L: {net_sign}₹{abs(pnl):,.2f}"
                             
                             html_lines.append(f'<div class="cal-day-cell" data-tooltip="{tooltip_clean}" title="{title_text}" style="height: {cell_height}; background-color: {bg_color}; border: 1px solid {border_color}; color: {text_color}; border-radius: 6px; padding: 3px 2px; font-size: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center;">')
                             html_lines.append(f'<div style="font-weight: 700; font-size: 11px;">{day}</div>')
