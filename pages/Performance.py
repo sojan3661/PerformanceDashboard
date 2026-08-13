@@ -50,7 +50,11 @@ if uploaded_file is not None:
                     else:
                         st.info("No new or updated records to add. All trades in this document were already up-to-date in the database.")
                 except Exception as db_e:
-                    st.error(f"Failed to connect and save to Supabase: {db_e}. Please make sure you have added your Supabase URL and Key in `.streamlit/secrets.toml`!")
+                    err_msg = str(db_e)
+                    if "42501" in err_msg or "row-level security" in err_msg.lower():
+                        st.error("Failed to save to Supabase: **Row-Level Security (RLS) Policy Error**. Please add an INSERT policy / disable RLS for table 'TradeMaster' in your Supabase SQL Editor, or use the `service_role` key in `.streamlit/secrets.toml`!")
+                    else:
+                        st.error(f"Failed to connect and save to Supabase: {db_e}. Please make sure you have added your Supabase URL and Key in `.streamlit/secrets.toml`!")
             
             display_df = trademaster_df.copy()
             if 'EnteredDate' in display_df.columns:
@@ -92,7 +96,11 @@ if uploaded_file is not None:
                     else:
                         st.info("No new or updated charges to add. All charges were already up-to-date in the database.")
                 except Exception as db_e:
-                    st.error(f"Failed to connect and save to Supabase: {db_e}. Please verify your database connection string!")
+                    err_msg = str(db_e)
+                    if "42501" in err_msg or "row-level security" in err_msg.lower():
+                        st.error("Failed to save to Supabase: **Row-Level Security (RLS) Policy Error**. Please add an INSERT policy / disable RLS for table 'Charges' in your Supabase SQL Editor, or use the `service_role` key in `.streamlit/secrets.toml`!")
+                    else:
+                        st.error(f"Failed to connect and save to Supabase: {db_e}. Please verify your database connection string!")
             
             display_charges_df = charges_df.copy()
             if 'Date' in display_charges_df.columns:

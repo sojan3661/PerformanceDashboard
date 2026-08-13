@@ -4,21 +4,16 @@ import pandas as pd
 import numpy as np
 
 @st.cache_resource
+def _get_client(url: str, key: str) -> Client:
+    return create_client(url, key)
+
 def init_connection() -> Client:
     url = st.secrets["supabase"]["url"]
     key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+    return _get_client(url, key)
 
-from supabase import create_client, Client
-import streamlit as st
-import pandas as pd
-import numpy as np
 
-@st.cache_resource
-def init_connection() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+
 
 def _clean_record_dict(rec_dict):
     """Clean dictionary for JSON serialization so no NaN or nan strings exist."""
