@@ -47,26 +47,48 @@ def save_to_trademaster(df: pd.DataFrame):
         else:
             break
             
-    def make_key(segment, symbol, strike, entered, exited):
-        seg_str = str(segment).strip() if pd.notna(segment) else ''
-        sym_str = str(symbol).strip().upper() if pd.notna(symbol) else ''
-        strk_str = str(strike).strip().upper() if pd.notna(strike) and str(strike).strip().upper() not in ['NONE', 'NAN', ''] else ''
+def make_key(segment, symbol, strike, entered, exited):
+    seg_str = str(segment).strip() if pd.notna(segment) and str(segment).strip() not in ['None', 'nan', 'NaN', '<NA>', ''] else ''
+    sym_str = str(symbol).strip().upper() if pd.notna(symbol) and str(symbol).strip().upper() not in ['NONE', 'NAN', ''] else ''
+    strk_str = str(strike).strip().upper() if pd.notna(strike) and str(strike).strip().upper() not in ['NONE', 'NAN', ''] else ''
+    
+    ent_str = ''
+    if pd.notna(entered) and str(entered).strip() not in ['None', 'nan', 'NaN', 'NaT', '<NA>', '']:
+        try:
+            ent_str = pd.to_datetime(entered).strftime('%Y-%m-%d')
+        except Exception:
+            ent_str = str(entered).strip()
+            
+    ext_str = ''
+    if pd.notna(exited) and str(exited).strip() not in ['None', 'nan', 'NaN', 'NaT', '<NA>', '']:
+        try:
+            ext_str = pd.to_datetime(exited).strftime('%Y-%m-%d')
+        except Exception:
+            ext_str = str(exited).strip()
+            
+    return f"{seg_str}|{sym_str}|{strk_str}|{ent_str}|{ext_str}"
+
+def save_to_trademaster(df: pd.DataFrame):
+    if df.empty:
+        return 0, 0
         
-        ent_str = ''
-        if pd.notna(entered):
-            try:
-                ent_str = pd.to_datetime(entered).strftime('%Y-%m-%d')
-            except Exception:
-                ent_str = str(entered).strip()
-                
-        ext_str = ''
-        if pd.notna(exited):
-            try:
-                ext_str = pd.to_datetime(exited).strftime('%Y-%m-%d')
-            except Exception:
-                ext_str = str(exited).strip()
-                
-        return f"{seg_str}|{sym_str}|{strk_str}|{ent_str}|{ext_str}"
+    client = init_connection()
+    keys = ['Segment', 'Symbol', 'StrikePrice', 'EnteredDate', 'ExitedDate']
+    select_cols = ['id'] + keys + ['Qty', 'BuyRate', 'SellRate']
+    
+    all_existing_data = []
+    limit = 1000
+    offset = 0
+    while True:
+        response = client.table("TradeMaster").select(",".join(select_cols)).range(offset, offset + limit - 1).execute()
+        data = response.data
+        if data:
+            all_existing_data.extend(data)
+            offset += limit
+            if len(data) < limit:
+                break
+        else:
+            break
 
     existing_map = {}
     if all_existing_data:
@@ -80,16 +102,30 @@ def save_to_trademaster(df: pd.DataFrame):
     for idx, row in df.iterrows():
         k = make_key(row.get('Segment'), row.get('Symbol'), row.get('StrikePrice'), row.get('EnteredDate'), row.get('ExitedDate'))
         
-        qty = float(row.get('Qty', 0) or 0)
-        buy_rate = float(row.get('BuyRate', 0) or 0)
-        sell_rate = float(row.get('SellRate', 0) or 0)
+        qty = round(float(row.get('Qty', 0) or 0), 4)
+        buy_rate = round(float(row.get('BuyRate', 0) or 0), 4)
+        sell_rate = round(float(row.get('SellRate', 0) or 0), 4)
         
-        entered_date = pd.to_datetime(row.get('EnteredDate')).strftime('%Y-%m-%d') if pd.notna(row.get('EnteredDate')) else None
-        exited_date = pd.to_datetime(row.get('ExitedDate')).strftime('%Y-%m-%d') if pd.notna(row.get('ExitedDate')) else None
+        entered_raw = row.get('EnteredDate')
+        exited_raw = row.get('ExitedDate')
+
+        entered_date = None
+        if pd.notna(entered_raw) and str(entered_raw).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
+            try:
+                entered_date = pd.to_datetime(entered_raw).strftime('%Y-%m-%d')
+            except Exception:
+                entered_date = str(entered_raw).strip()
+
+        exited_date = None
+        if pd.notna(exited_raw) and str(exited_raw).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
+            try:
+                exited_date = pd.to_datetime(exited_raw).strftime('%Y-%m-%d')
+            except Exception:
+                exited_date = str(exited_raw).strip()
         
-        symbol = str(row.get('Symbol')).strip().upper() if pd.notna(row.get('Symbol')) else None
+        symbol = str(row.get('Symbol')).strip().upper() if pd.notna(row.get('Symbol')) and str(row.get('Symbol')).strip().upper() not in ['NONE', 'NAN', ''] else None
         strike = str(row.get('StrikePrice')).strip().upper() if pd.notna(row.get('StrikePrice')) and str(row.get('StrikePrice')).strip().upper() not in ['NONE', 'NAN', ''] else None
-        segment = str(row.get('Segment')).strip() if pd.notna(row.get('Segment')) else None
+        segment = str(row.get('Segment')).strip() if pd.notna(row.get('Segment')) and str(row.get('Segment')).strip() not in ['NONE', 'NAN', ''] else None
 
         rec_dict = {
             'Segment': segment,
@@ -107,9 +143,9 @@ def save_to_trademaster(df: pd.DataFrame):
             records_to_insert.append(rec_dict)
         else:
             existing_row = existing_map[k]
-            ex_qty = float(existing_row.get('Qty', 0) or 0)
-            ex_buy = float(existing_row.get('BuyRate', 0) or 0)
-            ex_sell = float(existing_row.get('SellRate', 0) or 0)
+            ex_qty = round(float(existing_row.get('Qty', 0) or 0), 4)
+            ex_buy = round(float(existing_row.get('BuyRate', 0) or 0), 4)
+            ex_sell = round(float(existing_row.get('SellRate', 0) or 0), 4)
             
             if abs(qty - ex_qty) > 1e-4 or abs(buy_rate - ex_buy) > 1e-4 or abs(sell_rate - ex_sell) > 1e-4:
                 record_id = existing_row['id']
@@ -157,16 +193,30 @@ def save_to_charges(df: pd.DataFrame):
     if all_existing_data:
         for row in all_existing_data:
             dt_str = ''
-            if pd.notna(row.get('Date')):
-                dt_str = pd.to_datetime(row.get('Date')).strftime('%Y-%m-%d')
-            existing_map[dt_str] = row
+            raw_dt = row.get('Date')
+            if pd.notna(raw_dt) and str(raw_dt).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
+                try:
+                    dt_str = pd.to_datetime(raw_dt).strftime('%Y-%m-%d')
+                except Exception:
+                    dt_str = str(raw_dt).strip()
+            if dt_str:
+                existing_map[dt_str] = row
 
     records_to_insert = []
     records_to_update = []
 
     for idx, row in df.iterrows():
-        if pd.isna(row.get('Date')): continue
-        dt_str = pd.to_datetime(row.get('Date')).strftime('%Y-%m-%d')
+        raw_dt = row.get('Date')
+        if pd.isna(raw_dt) or str(raw_dt).strip() in ['None', 'nan', 'NaN', 'NaT', '']:
+            continue
+        try:
+            dt_str = pd.to_datetime(raw_dt).strftime('%Y-%m-%d')
+        except Exception:
+            dt_str = str(raw_dt).strip()
+            
+        if not dt_str:
+            continue
+
         chg = round(float(row.get('Charge', 0) or 0), 4)
 
         rec_dict = {

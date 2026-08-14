@@ -1,3 +1,4 @@
+import hashlib
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,26 +18,22 @@ from assets.ChartDrillDown import ChartDrillDown
 uploaded_file = st.file_uploader(
     "Choose a Trade Details Excel file", 
     type=['xlsx', 'xls'], 
-    help="Upload your Trade Details.xlsx file containing Fyers, AngelOne, Upstox, and/or Zerodha sheets"
+    help="Upload your Trade Details.xlsx file containing Fyers, AngelOne, Upstox, and/or Zerodha sheets",
+    key="trade_details_file_uploader"
 )
 
 if uploaded_file is not None:
-    st.success(f"File '{uploaded_file.name}' has been uploaded successfully!")
+    file_bytes = uploaded_file.getvalue()
+    current_file_hash = hashlib.md5(file_bytes).hexdigest()
     
-    try:
-        xls = pd.ExcelFile(uploaded_file)
-        
-        with st.spinner('Processing Trade data...'):
-            trademaster_df = build_trademaster(xls)
-
-        if trademaster_df.empty:
-            st.warning("No relevant Fyers, AngelOne, Upstox, or Zerodha data found in the uploaded file.")
-        else:
-            st.write(f"### Processed TradeMaster Data ({len(trademaster_df)} records)")
-            
-            # Save to Database
-            with st.spinner('Checking database for duplicates and saving new/updated records...'):
-                try:
+    if st.session_state.get('processed_file_hash') != current_file_hash:
+        with st.spinner('Processing Trade & Charges data and updating database...'):
+            try:
+                xls = pd.ExcelFile(uploaded_file)
+                
+                trademaster_df = build_trademaster(xls)
+                res_tm_msg = ""
+                if not trademaster_df.empty:
                     from config.db import save_to_trademaster
                     res_tm = save_to_trademaster(trademaster_df)
                     inserted_count, updated_count = res_tm if isinstance(res_tm, tuple) else (res_tm, 0)
@@ -46,43 +43,15 @@ if uploaded_file is not None:
                     if updated_count > 0:
                         msg_parts.append(f"updated {updated_count} existing record(s)")
                     if msg_parts:
-                        st.success(f"Successfully {' and '.join(msg_parts)} in the TradeMaster database!")
+                        res_tm_msg = f"Successfully {' and '.join(msg_parts)} in the TradeMaster database!"
                     else:
-                        st.info("No new or updated records to add. All trades in this document were already up-to-date in the database.")
-                except Exception as db_e:
-                    err_msg = str(db_e)
-                    if "42501" in err_msg or "row-level security" in err_msg.lower():
-                        st.error("Failed to save to Supabase: **Row-Level Security (RLS) Policy Error**. Please add an INSERT policy / disable RLS for table 'TradeMaster' in your Supabase SQL Editor, or use the `service_role` key in `.streamlit/secrets.toml`!")
-                    else:
-                        st.error(f"Failed to connect and save to Supabase: {db_e}. Please make sure you have added your Supabase URL and Key in `.streamlit/secrets.toml`!")
-            
-            display_df = trademaster_df.copy()
-            if 'EnteredDate' in display_df.columns:
-                display_df['EnteredDate'] = pd.to_datetime(display_df['EnteredDate']).dt.date
-            if 'ExitedDate' in display_df.columns:
-                display_df['ExitedDate'] = pd.to_datetime(display_df['ExitedDate']).dt.date
-                
-            st.dataframe(display_df, use_container_width=True)
-            
-            csv_data = trademaster_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download TradeMaster as CSV",
-                data=csv_data,
-                file_name='TradeMaster.csv',
-                mime='text/csv',
-            )
+                        res_tm_msg = "All trades in this file were already up-to-date in the database."
+                else:
+                    res_tm_msg = "No relevant Fyers, AngelOne, Upstox, or Zerodha trade data found."
 
-        with st.spinner('Processing Charges data...'):
-            charges_df = build_charges_dataframe(xls)
-
-        if charges_df.empty:
-            st.warning("No relevant Charges data found in the uploaded file.")
-        else:
-            st.write(f"### Processed Charges Data ({len(charges_df)} records)")
-            
-            # Save to Database for Charges
-            with st.spinner('Checking database for duplicate charges and saving new/updated records...'):
-                try:
+                charges_df = build_charges_dataframe(xls)
+                res_chg_msg = ""
+                if not charges_df.empty:
                     from config.db import save_to_charges
                     res_chg = save_to_charges(charges_df)
                     inserted_charges, updated_charges = res_chg if isinstance(res_chg, tuple) else (res_chg, 0)
@@ -92,39 +61,51 @@ if uploaded_file is not None:
                     if updated_charges > 0:
                         chg_parts.append(f"updated {updated_charges} existing record(s)")
                     if chg_parts:
-                        st.success(f"Successfully {' and '.join(chg_parts)} in the Charges database!")
+                        res_chg_msg = f"Successfully {' and '.join(chg_parts)} in the Charges database!"
                     else:
-                        st.info("No new or updated charges to add. All charges were already up-to-date in the database.")
-                except Exception as db_e:
-                    err_msg = str(db_e)
-                    if "42501" in err_msg or "row-level security" in err_msg.lower():
-                        st.error("Failed to save to Supabase: **Row-Level Security (RLS) Policy Error**. Please add an INSERT policy / disable RLS for table 'Charges' in your Supabase SQL Editor, or use the `service_role` key in `.streamlit/secrets.toml`!")
-                    else:
-                        st.error(f"Failed to connect and save to Supabase: {db_e}. Please verify your database connection string!")
-            
-            display_charges_df = charges_df.copy()
-            if 'Date' in display_charges_df.columns:
-                display_charges_df['Date'] = pd.to_datetime(display_charges_df['Date']).dt.date
+                        res_chg_msg = "All charges in this file were already up-to-date in the database."
+                else:
+                    res_chg_msg = "No relevant Charges data found."
+
+                # Clear cache so get_processed_data fetches updated DB data immediately
+                get_processed_data.clear()
+
+                st.session_state['processed_file_hash'] = current_file_hash
+                st.session_state['upload_summary'] = {
+                    'filename': uploaded_file.name,
+                    'tm_records': len(trademaster_df),
+                    'tm_msg': res_tm_msg,
+                    'chg_records': len(charges_df),
+                    'chg_msg': res_chg_msg,
+                    'error': None
+                }
                 
-            st.dataframe(display_charges_df, use_container_width=True)
-            
-            csv_charges = charges_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download Charges as CSV",
-                data=csv_charges,
-                file_name='Charges.csv',
-                mime='text/csv',
-            )
-            
-        # Clear the cache whenever a file is uploaded to ensure subsequent UI 
-        # uses the freshest data from the database.
-        get_processed_data.clear()
-            
-    except Exception as e:
-        import traceback
-        st.error(f"An error occurred while processing the file: {e}")
-        with st.expander("Show stack trace"):
-            st.code(traceback.format_exc())
+                st.rerun()
+
+            except Exception as e:
+                import traceback
+                st.session_state['upload_summary'] = {
+                    'filename': uploaded_file.name,
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
+                }
+
+    summary = st.session_state.get('upload_summary')
+    if summary:
+        if summary.get('error'):
+            st.error(f"An error occurred while processing '{summary.get('filename')}': {summary.get('error')}")
+            with st.expander("Show stack trace"):
+                st.code(summary.get('traceback', ''))
+        else:
+            st.success(f"File **'{summary.get('filename')}'** uploaded and processed successfully!")
+            st.info(f"📈 TradeMaster: {summary.get('tm_msg')} ({summary.get('tm_records', 0)} record(s) parsed)")
+            st.info(f"📉 Charges: {summary.get('chg_msg')} ({summary.get('chg_records', 0)} record(s) parsed)")
+
+else:
+    if 'processed_file_hash' in st.session_state:
+        del st.session_state['processed_file_hash']
+    if 'upload_summary' in st.session_state:
+        del st.session_state['upload_summary']
 
 # st.divider()
 # st.header("📋 Database Overview (Cached)")

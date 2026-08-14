@@ -147,6 +147,10 @@ def process_angelone_data(xls):
 
             rename_eq = {'Avg Buy Price': 'BuyRate', 'Avg Sell Price': 'SellRate', 'Buy Date': 'EnteredDate', 'Sell Date': 'ExitedDate'}
             df_eq = df_eq.rename(columns=rename_eq)
+            if 'EnteredDate' in df_eq.columns:
+                df_eq['EnteredDate'] = pd.to_datetime(df_eq['EnteredDate'], errors='coerce')
+            if 'ExitedDate' in df_eq.columns:
+                df_eq['ExitedDate'] = pd.to_datetime(df_eq['ExitedDate'], errors='coerce')
 
             cols_to_drop_eq = ["ISIN", "Type of instrument", "Purchase Type", "Short term taxable income", "Long term taxable income", "Net Profit/Loss", "STT", "Charges and Statutory Levies", "Cost Of Acquisition", "Sell Value", "Buy Value"]
             df_eq = df_eq.drop(columns=[c for c in cols_to_drop_eq if c in df_eq.columns])
@@ -284,6 +288,10 @@ def process_zerodha_data(xls):
 
             rename_dict = {'Quantity': 'Qty', 'Entry Date': 'EnteredDate', 'Exit Date': 'ExitedDate', 'Buy Rate': 'BuyRate', 'Sell Rate': 'SellRate'}
             df_eq = df_eq.rename(columns=rename_dict)
+            if 'EnteredDate' in df_eq.columns:
+                df_eq['EnteredDate'] = pd.to_datetime(df_eq['EnteredDate'], errors='coerce')
+            if 'ExitedDate' in df_eq.columns:
+                df_eq['ExitedDate'] = pd.to_datetime(df_eq['ExitedDate'], errors='coerce')
 
             cols_to_drop = ["ISIN", "STT", "Stamp Duty", "IGST", "SGST", "CGST", "SEBI Charges", "IPFT", "Exchange Transaction Charges", "Brokerage", "Turnover", "Taxable Profit", "Fair Market Value", "Period of Holding", "Profit", "Buy Value", "Sell Value"]
             df_eq = df_eq.drop(columns=[c for c in cols_to_drop if c in df_eq.columns])
@@ -302,6 +310,10 @@ def process_zerodha_data(xls):
 
             rename_dict = {'Quantity': 'Qty', 'Entry Date': 'EnteredDate', 'Exit Date': 'ExitedDate', 'Buy Rate': 'BuyRate', 'Sell Rate': 'SellRate'}
             df_mf = df_mf.rename(columns=rename_dict)
+            if 'EnteredDate' in df_mf.columns:
+                df_mf['EnteredDate'] = pd.to_datetime(df_mf['EnteredDate'], errors='coerce')
+            if 'ExitedDate' in df_mf.columns:
+                df_mf['ExitedDate'] = pd.to_datetime(df_mf['ExitedDate'], errors='coerce')
 
             cols_to_drop = ["ISIN", "Turnover", "Taxable Profit", "Fair Market Value", "Period of Holding", "Profit", "Buy Value", "Sell Value"]
             df_mf = df_mf.drop(columns=[c for c in cols_to_drop if c in df_mf.columns])
@@ -331,6 +343,12 @@ def build_trademaster(xls):
         # Clean Symbol and StrikePrice
         trademaster_df['Symbol'] = trademaster_df['Symbol'].apply(_clean_symbol)
         trademaster_df['StrikePrice'] = trademaster_df['StrikePrice'].apply(_clean_strikeprice)
+
+        # Standardize dates to YYYY-MM-DD strings before grouping
+        trademaster_df['EnteredDate'] = pd.to_datetime(trademaster_df['EnteredDate'], errors='coerce').dt.strftime('%Y-%m-%d')
+        trademaster_df['ExitedDate'] = pd.to_datetime(trademaster_df['ExitedDate'], errors='coerce').dt.strftime('%Y-%m-%d')
+        trademaster_df['EnteredDate'] = trademaster_df['EnteredDate'].replace({'NaT': None, 'nan': None, '': None})
+        trademaster_df['ExitedDate'] = trademaster_df['ExitedDate'].replace({'NaT': None, 'nan': None, '': None})
 
         # Convert to numeric for grouping calculations
         trademaster_df['Qty'] = pd.to_numeric(trademaster_df['Qty'], errors='coerce').fillna(0)

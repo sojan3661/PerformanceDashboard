@@ -58,6 +58,7 @@ def build_charges_dataframe(xls):
     
     if not final_df.empty:
         if 'Date' in final_df.columns:
+            final_df['Date'] = pd.to_datetime(final_df['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
             final_df = final_df.dropna(subset=['Date'])
         
         expected_cols = ['Date', 'Charge']
