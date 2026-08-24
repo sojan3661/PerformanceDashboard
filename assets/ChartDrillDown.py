@@ -669,12 +669,17 @@ class ChartDrillDown:
                 elif 'EnteredTradeCount' in c_df.columns and 'ExitedTradeCount' in c_df.columns:
                     standalone_chg = c_df[(c_df['EnteredTradeCount'] == 0) & (c_df['ExitedTradeCount'] == 0)].copy()
 
+        # Checkbox session state for including standalone charges on non-trading days
+        inc_standalone_key = f"{key_prefix}_inc_standalone"
+        include_standalone = st.session_state.get(inc_standalone_key, True)
+        effective_standalone_chg = standalone_chg if include_standalone else pd.DataFrame()
+
         # Combine FY list from trades and standalone charges
         fy_set = set()
         if not df_cal.empty and 'FY' in df_cal.columns:
             fy_set.update(df_cal['FY'].dropna().unique())
-        if not standalone_chg.empty and 'FY' in standalone_chg.columns:
-            fy_set.update(standalone_chg['FY'].dropna().unique())
+        if not effective_standalone_chg.empty and 'FY' in effective_standalone_chg.columns:
+            fy_set.update(effective_standalone_chg['FY'].dropna().unique())
         
         fy_list = sorted([str(x) for x in fy_set if x])
 
@@ -686,7 +691,7 @@ class ChartDrillDown:
         fy_summary = {}
         for fy_val in fy_list:
             fy_trades = df_cal[df_cal['FY'] == fy_val] if not df_cal.empty else pd.DataFrame()
-            fy_st_chg = standalone_chg[standalone_chg['FY'] == fy_val] if not standalone_chg.empty else pd.DataFrame()
+            fy_st_chg = effective_standalone_chg[effective_standalone_chg['FY'] == fy_val] if not effective_standalone_chg.empty else pd.DataFrame()
             
             trade_net = fy_trades['Net_PNL'].sum() if not fy_trades.empty else 0.0
             st_chg_sum = fy_st_chg['Charge'].sum() if not fy_st_chg.empty else 0.0
@@ -829,7 +834,7 @@ class ChartDrillDown:
 
         # Filter trade and standalone charge data for selected FY
         fy_df = df_cal[df_cal['FY'] == selected_fy].copy() if not df_cal.empty else pd.DataFrame()
-        fy_st = standalone_chg[standalone_chg['FY'] == selected_fy].copy() if not standalone_chg.empty else pd.DataFrame()
+        fy_st = effective_standalone_chg[effective_standalone_chg['FY'] == selected_fy].copy() if not effective_standalone_chg.empty else pd.DataFrame()
 
         trade_gross_map = fy_df.groupby('CleanDate')['Gross_PNL'].sum().to_dict() if not fy_df.empty else {}
         trade_chg_map = fy_df.groupby('CleanDate')['Trade_Charges'].sum().to_dict() if not fy_df.empty else {}
@@ -877,14 +882,24 @@ class ChartDrillDown:
             ("March", 3, end_year)
         ]
 
-        # Month Filter Tabs / Selectbox
+        # Controls Row: Month Filter & Standalone Charges Toggle
         st.markdown("---")
-        month_options = ["All 12 Months"] + [m[0] for m in fy_months]
-        selected_month_view = st.selectbox(
-            "Filter Calendar by Month",
-            options=month_options,
-            key=f"{key_prefix}_month_select"
-        )
+        c_filter1, c_filter2 = st.columns([2, 1])
+        with c_filter1:
+            month_options = ["All 12 Months"] + [m[0] for m in fy_months]
+            selected_month_view = st.selectbox(
+                "Filter Calendar by Month",
+                options=month_options,
+                key=f"{key_prefix}_month_select"
+            )
+        with c_filter2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            st.checkbox(
+                "Include Standalone Non-Trading Day Charges",
+                value=True,
+                key=inc_standalone_key,
+                help="When enabled, charges on dates with no active trades (e.g. DP/demat charges, non-trading day fees like -₹59) are included in the calendar."
+            )
 
         # Filter active dates by selected month
         if selected_month_view == "All 12 Months":
