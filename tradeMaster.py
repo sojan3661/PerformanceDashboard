@@ -24,6 +24,45 @@ def _clean_strikeprice(val):
     s = str(val).strip().upper()
     return s if s not in ['', 'NAN', 'NONE', '<NA>'] else None
 
+def _extract_fyers_symbol_and_strike(symbol_series):
+    """
+    Vectorized extraction of Symbol and StrikePrice for Fyers FO symbols.
+    Handles formats like:
+    - 'NIFTY 29MAY25 22600 CE' -> Symbol: 'NIFTY', StrikePrice: '22600 CE'
+    - 'NIFTY 22600 CE' -> Symbol: 'NIFTY', StrikePrice: '22600 CE'
+    - 'BANKNIFTY 05JUN25 50000 PE' -> Symbol: 'BANKNIFTY', StrikePrice: '50000 PE'
+    - 'BANKNIFTY 50000 PE' -> Symbol: 'BANKNIFTY', StrikePrice: '50000 PE'
+    - 'RELIANCE' -> Symbol: 'RELIANCE', StrikePrice: None
+    """
+    if symbol_series.empty:
+        return pd.Series(dtype='object'), pd.Series(dtype='object')
+        
+    symbols = symbol_series.astype(str).str.strip()
+    base_symbols = pd.Series(index=symbol_series.index, dtype='object')
+    strike_prices = pd.Series(index=symbol_series.index, dtype='object')
+    
+    for idx, raw in symbols.items():
+        if not raw or raw.upper() in ['NONE', 'NAN', '<NA>']:
+            base_symbols.at[idx] = None
+            strike_prices.at[idx] = None
+            continue
+            
+        parts = raw.split()
+        if len(parts) >= 4:
+            base_symbols.at[idx] = parts[0]
+            strike_prices.at[idx] = " ".join(parts[2:])
+        elif len(parts) == 3:
+            base_symbols.at[idx] = parts[0]
+            strike_prices.at[idx] = " ".join(parts[1:])
+        elif len(parts) == 2:
+            base_symbols.at[idx] = parts[0]
+            strike_prices.at[idx] = parts[1]
+        else:
+            base_symbols.at[idx] = parts[0]
+            strike_prices.at[idx] = None
+            
+    return base_symbols, strike_prices
+
 def process_fyers_data(xls):
     sheet_names = xls.sheet_names
     df_eq = pd.DataFrame()
@@ -31,13 +70,14 @@ def process_fyers_data(xls):
     df_fo = pd.DataFrame()
     df_comm = pd.DataFrame()
 
-    eq_sheet = _find_sheet(sheet_names, [r'^fyers\s*-\s*eq\b(?!.*short)'])
-    if eq_sheet:
+    # Match Fyers EQ sheets flexibly
+    eq_sheet = _find_sheet(sheet_names, [r'fyers.*eq', r'fyers.*equity', r'fyers.*tradebook', r'fyers.*trades', r'^fyers$'])
+    if eq_sheet and not re.search(r'short|fo|option|commodi|charge', eq_sheet, re.IGNORECASE):
         df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
         if 'Symbol' in df_eq.columns:
             df_eq = df_eq.dropna(subset=['Symbol'])
 
-    short_sheet = _find_sheet(sheet_names, [r'fyers.*short.*term', r'fyers.*eq.*short'])
+    short_sheet = _find_sheet(sheet_names, [r'fyers.*short.*term', r'fyers.*eq.*short', r'fyers.*short'])
     if short_sheet:
         df_eq1 = pd.read_excel(xls, sheet_name=short_sheet)
         if 'Symbol' in df_eq1.columns:
@@ -46,10 +86,14 @@ def process_fyers_data(xls):
     df_combined = pd.concat([df_eq, df_eq1], ignore_index=True)
     if not df_combined.empty:
         df_combined['StrikePrice'] = None
+        if 'Segment' not in df_combined.columns:
+            df_combined['Segment'] = 'Equity & Mutual Fund'
 
-    options_sheet = _find_sheet(sheet_names, [r'fyers.*option', r'fyers.*fo'])
+    options_sheet = _find_sheet(sheet_names, [r'fyers.*option', r'fyers.*fo', r'fyers.*f&o', r'fyers.*f\s*&\s*o'])
     if options_sheet:
         df_fo = pd.read_excel(xls, sheet_name=options_sheet)
+        if not df_fo.empty:
+            df_fo['Segment'] = 'Options'
 
     comm_sheet = _find_sheet(sheet_names, [r'fyers.*commodi'])
     if comm_sheet:
@@ -68,19 +112,15 @@ def process_fyers_data(xls):
                 'Turnover': 'Turnover (₹)',
             }
             df_comm = df_comm.rename(columns=rename_comm)
+            df_comm['Segment'] = 'Commodity'
 
     df_fo = pd.concat([df_fo, df_comm], ignore_index=True)
 
     if not df_fo.empty and 'Symbol' in df_fo.columns:
         df_fo = df_fo.dropna(subset=['Symbol'])
-
-        split_df = df_fo['Symbol'].astype(str).str.split(' ', n=3, expand=True)
-        for col in range(4):
-            if col not in split_df.columns:
-                split_df[col] = ''
-        df_fo['Symbol'] = split_df[0]
-        df_fo['StrikePrice'] = split_df[2].fillna('').astype(str) + " " + split_df[3].fillna('').astype(str)
-        df_fo['StrikePrice'] = df_fo['StrikePrice'].str.strip()
+        syms, strikes = _extract_fyers_symbol_and_strike(df_fo['Symbol'])
+        df_fo['Symbol'] = syms
+        df_fo['StrikePrice'] = strikes
 
     final_df = pd.concat([df_combined, df_fo], ignore_index=True)
     if final_df.empty:
@@ -91,24 +131,27 @@ def process_fyers_data(xls):
 
     segment_mapping = {
         'NSE-FNO': 'Options',
-        'NSE-Cash': 'Equity',
-        'BSE-Cash': 'Equity',
-        'BSE-MF': 'Mutual Fund'
+        'BSE-FNO': 'Options',
+        'NSE-Cash': 'Equity & Mutual Fund',
+        'BSE-Cash': 'Equity & Mutual Fund',
+        'BSE-MF': 'Equity & Mutual Fund'
     }
     final_df['Segment'] = final_df['Segment'].replace(segment_mapping)
 
     def apply_segment_rule(row):
         seg = str(row.get('Segment', '')).strip()
-        txn = str(row.get('Txn Type', '')).strip()
-
-        if seg.lower() in ['equity', 'mutual fund']:
+        if seg.lower() in ['equity', 'mutual fund', 'equity & mutual fund']:
             return 'Equity & Mutual Fund'
-        elif seg.lower() == 'commodity':
-            return f"Commodity-{txn}" if txn else "Commodity"
-        else:
-            return txn if txn else seg
+        elif 'commodi' in seg.lower():
+            return 'Commodity'
+        elif seg.lower() in ['options', 'fno', 'nse-fno', 'bse-fno']:
+            return 'Options'
+        elif seg:
+            return seg
+        return 'Equity & Mutual Fund'
 
     final_df['Segment'] = final_df.apply(apply_segment_rule, axis=1)
+
     if 'Buy Date' in final_df.columns and 'Sell Date' in final_df.columns:
         final_df['Buy Date'] = pd.to_datetime(final_df['Buy Date'], errors='coerce')
         final_df['Sell Date'] = pd.to_datetime(final_df['Sell Date'], errors='coerce')
@@ -136,8 +179,8 @@ def process_angelone_data(xls):
     df_eq = pd.DataFrame()
     df_fo = pd.DataFrame()
 
-    eq_sheet = _find_sheet(sheet_names, [r'angel.*eq', r'angel.*equity'])
-    if eq_sheet:
+    eq_sheet = _find_sheet(sheet_names, [r'angel.*eq', r'angel.*equity', r'^angel\s*one$', r'^angel$'])
+    if eq_sheet and not re.search(r'fo|option|f&o', eq_sheet, re.IGNORECASE):
         df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
         if not df_eq.empty:
             if 'Scrip Name' in df_eq.columns:
@@ -156,7 +199,7 @@ def process_angelone_data(xls):
             df_eq = df_eq.drop(columns=[c for c in cols_to_drop_eq if c in df_eq.columns])
             df_eq['StrikePrice'] = None
 
-    fo_sheet = _find_sheet(sheet_names, [r'angel.*fo', r'angel.*f&o', r'angel.*option'])
+    fo_sheet = _find_sheet(sheet_names, [r'angel.*fo', r'angel.*f&o', r'angel.*f\s*&\s*o', r'angel.*option'])
     if fo_sheet:
         df_fo = pd.read_excel(xls, sheet_name=fo_sheet)
         if not df_fo.empty:
@@ -171,14 +214,13 @@ def process_angelone_data(xls):
             if 'Option Type' in df_fo.columns:
                 df_fo['Segment'] = df_fo['Option Type'].apply(lambda x: "Options" if pd.notna(x) and str(x).strip() != "" else "Equity & Mutual Fund")
             else:
-                df_fo['Segment'] = "Equity & Mutual Fund"
+                df_fo['Segment'] = "Options"
 
             if 'Strike Price' in df_fo.columns and 'Option Type' in df_fo.columns:
                 strike_str = df_fo['Strike Price'].astype(str).str.replace(r'\.0$', '', regex=True)
                 strike_str = strike_str.replace('nan', '')
                 opt_type = df_fo['Option Type'].fillna('').astype(str)
-                df_fo['StrikePrice'] = strike_str + " " + opt_type
-                df_fo['StrikePrice'] = df_fo['StrikePrice'].str.strip()
+                df_fo['StrikePrice'] = (strike_str + " " + opt_type).str.strip()
             else:
                 df_fo['StrikePrice'] = None
 
@@ -205,11 +247,11 @@ def process_upstox_data(xls):
     df_eq = pd.DataFrame()
     df_fo = pd.DataFrame()
 
-    eq_sheet = _find_sheet(sheet_names, [r'upstox.*eq', r'upstox.*equity'])
-    if eq_sheet:
+    eq_sheet = _find_sheet(sheet_names, [r'upstox.*eq', r'upstox.*equity', r'^upstox$'])
+    if eq_sheet and not re.search(r'fo|option|f&o', eq_sheet, re.IGNORECASE):
         df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
 
-    fo_sheet = _find_sheet(sheet_names, [r'upstox.*option', r'upstox.*fo', r'upstox.*f&o'])
+    fo_sheet = _find_sheet(sheet_names, [r'upstox.*option', r'upstox.*fo', r'upstox.*f&o', r'upstox.*f\s*&\s*o'])
     if fo_sheet:
         df_fo = pd.read_excel(xls, sheet_name=fo_sheet)
 
@@ -243,8 +285,7 @@ def process_upstox_data(xls):
 
     final_df['Segment'] = final_df.apply(get_segment, axis=1)
 
-    final_df['StrikePrice'] = final_df['Strike Price'].astype(str) + " " + scrip_opt
-    final_df['StrikePrice'] = final_df['StrikePrice'].str.strip()
+    final_df['StrikePrice'] = (final_df['Strike Price'].astype(str) + " " + scrip_opt).str.strip()
 
     if 'Scrip Opt' in final_df.columns:
         final_df = final_df.drop(columns=['Scrip Opt'])
@@ -275,8 +316,9 @@ def process_zerodha_data(xls):
     df_eq = pd.DataFrame()
     df_mf = pd.DataFrame()
 
-    eq_sheet = _find_sheet(sheet_names, [r'^zerodha\b(?!.*mf)', r'zerodha.*eq', r'zerodha.*equity'])
-    if eq_sheet:
+    # Explicitly avoid matching MF sheet in Zerodha EQ
+    eq_sheet = _find_sheet(sheet_names, [r'zerodha.*(eq|equity|tradebook)', r'^zerodha$'])
+    if eq_sheet and not re.search(r'\b(mf|mutual)\b', eq_sheet, re.IGNORECASE):
         df_eq = pd.read_excel(xls, sheet_name=eq_sheet)
         if not df_eq.empty:
             df_eq['Segment'] = 'Equity & Mutual Fund'
@@ -297,7 +339,7 @@ def process_zerodha_data(xls):
             df_eq = df_eq.drop(columns=[c for c in cols_to_drop if c in df_eq.columns])
             df_eq['StrikePrice'] = None
 
-    mf_sheet = _find_sheet(sheet_names, [r'zerodha.*mf', r'zerodha.*mutual'])
+    mf_sheet = _find_sheet(sheet_names, [r'zerodha.*(mf|mutual)'])
     if mf_sheet:
         df_mf = pd.read_excel(xls, sheet_name=mf_sheet)
         if not df_mf.empty:
@@ -355,7 +397,7 @@ def build_trademaster(xls):
         trademaster_df['BuyRate'] = pd.to_numeric(trademaster_df['BuyRate'], errors='coerce').fillna(0)
         trademaster_df['SellRate'] = pd.to_numeric(trademaster_df['SellRate'], errors='coerce').fillna(0)
 
-        # Calculate intermediate Total values
+        # Calculate intermediate Total values for weighted average calculation
         trademaster_df['TotalBuy'] = trademaster_df['Qty'] * trademaster_df['BuyRate']
         trademaster_df['TotalSell'] = trademaster_df['Qty'] * trademaster_df['SellRate']
 

@@ -12,9 +12,6 @@ def init_connection() -> Client:
     key = st.secrets["supabase"]["key"]
     return _get_client(url, key)
 
-
-
-
 def _clean_record_dict(rec_dict):
     """Clean dictionary for JSON serialization so no NaN or nan strings exist."""
     cleaned = {}
@@ -25,28 +22,6 @@ def _clean_record_dict(rec_dict):
             cleaned[k] = v
     return cleaned
 
-def save_to_trademaster(df: pd.DataFrame):
-    if df.empty:
-        return 0, 0
-        
-    client = init_connection()
-    keys = ['Segment', 'Symbol', 'StrikePrice', 'EnteredDate', 'ExitedDate']
-    select_cols = ['id'] + keys + ['Qty', 'BuyRate', 'SellRate']
-    
-    all_existing_data = []
-    limit = 1000
-    offset = 0
-    while True:
-        response = client.table("TradeMaster").select(",".join(select_cols)).range(offset, offset + limit - 1).execute()
-        data = response.data
-        if data:
-            all_existing_data.extend(data)
-            offset += limit
-            if len(data) < limit:
-                break
-        else:
-            break
-            
 def make_key(segment, symbol, strike, entered, exited):
     seg_str = str(segment).strip() if pd.notna(segment) and str(segment).strip() not in ['None', 'nan', 'NaN', '<NA>', ''] else ''
     sym_str = str(symbol).strip().upper() if pd.notna(symbol) and str(symbol).strip().upper() not in ['NONE', 'NAN', ''] else ''
@@ -90,11 +65,25 @@ def save_to_trademaster(df: pd.DataFrame):
         else:
             break
 
-    existing_map = {}
+    # Group existing DB data by composite key to handle duplicates
+    existing_key_map = {}
+    duplicate_ids_to_delete = []
+
     if all_existing_data:
         for row in all_existing_data:
             k = make_key(row.get('Segment'), row.get('Symbol'), row.get('StrikePrice'), row.get('EnteredDate'), row.get('ExitedDate'))
-            existing_map[k] = row
+            if k not in existing_key_map:
+                existing_key_map[k] = row
+            else:
+                # Mark excess duplicate row for cleanup
+                duplicate_ids_to_delete.append(row['id'])
+
+    # Clean up duplicate rows in Supabase if any exist
+    if duplicate_ids_to_delete:
+        chunk_size = 500
+        for i in range(0, len(duplicate_ids_to_delete), chunk_size):
+            chunk = duplicate_ids_to_delete[i:i+chunk_size]
+            client.table("TradeMaster").delete().in_('id', chunk).execute()
 
     records_to_insert = []
     records_to_update = []
@@ -139,21 +128,25 @@ def save_to_trademaster(df: pd.DataFrame):
         }
         rec_dict = _clean_record_dict(rec_dict)
 
-        if k not in existing_map:
+        if k not in existing_key_map:
             records_to_insert.append(rec_dict)
+            # Add to local map so subsequent identical rows in the same batch don't double insert
+            existing_key_map[k] = rec_dict
         else:
-            existing_row = existing_map[k]
-            ex_qty = round(float(existing_row.get('Qty', 0) or 0), 4)
-            ex_buy = round(float(existing_row.get('BuyRate', 0) or 0), 4)
-            ex_sell = round(float(existing_row.get('SellRate', 0) or 0), 4)
-            
-            if abs(qty - ex_qty) > 1e-4 or abs(buy_rate - ex_buy) > 1e-4 or abs(sell_rate - ex_sell) > 1e-4:
-                record_id = existing_row['id']
-                records_to_update.append((record_id, rec_dict))
+            existing_row = existing_key_map[k]
+            if 'id' in existing_row:
+                ex_qty = round(float(existing_row.get('Qty', 0) or 0), 4)
+                ex_buy = round(float(existing_row.get('BuyRate', 0) or 0), 4)
+                ex_sell = round(float(existing_row.get('SellRate', 0) or 0), 4)
+                
+                if abs(qty - ex_qty) > 1e-4 or abs(buy_rate - ex_buy) > 1e-4 or abs(sell_rate - ex_sell) > 1e-4:
+                    record_id = existing_row['id']
+                    records_to_update.append((record_id, rec_dict))
 
     inserted = 0
     updated = 0
 
+    # Bulk insert chunks of 500
     if records_to_insert:
         chunk_size = 500
         for i in range(0, len(records_to_insert), chunk_size):
@@ -161,6 +154,7 @@ def save_to_trademaster(df: pd.DataFrame):
             client.table("TradeMaster").insert(chunk).execute()
             inserted += len(chunk)
 
+    # Update modified records
     if records_to_update:
         for rec_id, update_dict in records_to_update:
             client.table("TradeMaster").update(update_dict).eq('id', rec_id).execute()
@@ -189,7 +183,10 @@ def save_to_charges(df: pd.DataFrame):
         else:
             break
 
-    existing_map = {}
+    # Group existing DB data by date string to handle duplicate date rows
+    existing_date_map = {}
+    duplicate_ids_to_delete = []
+
     if all_existing_data:
         for row in all_existing_data:
             dt_str = ''
@@ -200,7 +197,17 @@ def save_to_charges(df: pd.DataFrame):
                 except Exception:
                     dt_str = str(raw_dt).strip()
             if dt_str:
-                existing_map[dt_str] = row
+                if dt_str not in existing_date_map:
+                    existing_date_map[dt_str] = row
+                else:
+                    duplicate_ids_to_delete.append(row['id'])
+
+    # Delete duplicate date rows in DB
+    if duplicate_ids_to_delete:
+        chunk_size = 500
+        for i in range(0, len(duplicate_ids_to_delete), chunk_size):
+            chunk = duplicate_ids_to_delete[i:i+chunk_size]
+            client.table("Charges").delete().in_('id', chunk).execute()
 
     records_to_insert = []
     records_to_update = []
@@ -225,14 +232,16 @@ def save_to_charges(df: pd.DataFrame):
         }
         rec_dict = _clean_record_dict(rec_dict)
 
-        if dt_str not in existing_map:
+        if dt_str not in existing_date_map:
             records_to_insert.append(rec_dict)
+            existing_date_map[dt_str] = rec_dict
         else:
-            ex_row = existing_map[dt_str]
-            ex_chg = round(float(ex_row.get('Charge', 0) or 0), 4)
-            if abs(chg - ex_chg) > 1e-4:
-                record_id = ex_row['id']
-                records_to_update.append((record_id, rec_dict))
+            ex_row = existing_date_map[dt_str]
+            if 'id' in ex_row:
+                ex_chg = round(float(ex_row.get('Charge', 0) or 0), 4)
+                if abs(chg - ex_chg) > 1e-4:
+                    record_id = ex_row['id']
+                    records_to_update.append((record_id, rec_dict))
 
     inserted = 0
     updated = 0
@@ -250,5 +259,3 @@ def save_to_charges(df: pd.DataFrame):
             updated += 1
 
     return inserted, updated
-
-

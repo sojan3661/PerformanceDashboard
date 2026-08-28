@@ -15,18 +15,24 @@ from chargesMaster import build_charges_dataframe
 from DataProcessing import get_processed_data
 from assets.ChartDrillDown import ChartDrillDown
 
-uploaded_file = st.file_uploader(
-    "Choose a Trade Details Excel file", 
-    type=['xlsx', 'xls'], 
-    help="Upload your Trade Details.xlsx file containing Fyers, AngelOne, Upstox, and/or Zerodha sheets",
-    key="trade_details_file_uploader"
-)
+col_up1, col_up2 = st.columns([4, 1])
+with col_up1:
+    uploaded_file = st.file_uploader(
+        "Choose a Trade Details Excel file", 
+        type=['xlsx', 'xls'], 
+        help="Upload your Trade Details.xlsx file containing Fyers, AngelOne, Upstox, and/or Zerodha sheets",
+        key="trade_details_file_uploader"
+    )
+with col_up2:
+    st.write(" ")
+    st.write(" ")
+    force_reprocess = st.button("🔄 Sync / Re-process", help="Force re-parsing and database update for the uploaded file")
 
 if uploaded_file is not None:
     file_bytes = uploaded_file.getvalue()
     current_file_hash = hashlib.md5(file_bytes).hexdigest()
     
-    if st.session_state.get('processed_file_hash') != current_file_hash:
+    if force_reprocess or st.session_state.get('processed_file_hash') != current_file_hash:
         with st.spinner('Processing Trade & Charges data and updating database...'):
             try:
                 xls = pd.ExcelFile(uploaded_file)
