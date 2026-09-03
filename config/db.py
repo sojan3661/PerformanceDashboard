@@ -22,34 +22,41 @@ def _clean_record_dict(rec_dict):
             cleaned[k] = v
     return cleaned
 
-def make_key(segment, symbol, strike, entered, exited):
-    seg_str = str(segment).strip() if pd.notna(segment) and str(segment).strip() not in ['None', 'nan', 'NaN', '<NA>', ''] else ''
+def make_full_trade_key(symbol, segment, strike_price, qty, buy_rate, sell_rate, entered_date, exited_date):
     sym_str = str(symbol).strip().upper() if pd.notna(symbol) and str(symbol).strip().upper() not in ['NONE', 'NAN', ''] else ''
-    strk_str = str(strike).strip().upper() if pd.notna(strike) and str(strike).strip().upper() not in ['NONE', 'NAN', ''] else ''
+    seg_str = str(segment).strip() if pd.notna(segment) and str(segment).strip() not in ['NONE', 'NAN', ''] else ''
+    strk_str = str(strike_price).strip().upper() if pd.notna(strike_price) and str(strike_price).strip().upper() not in ['NONE', 'NAN', ''] else ''
+    
+    qty_val = round(float(qty), 4) if (pd.notna(qty) and str(qty).strip() not in ['None', 'nan', 'NaN', '']) else 0.0
+    buy_val = round(float(buy_rate), 4) if (pd.notna(buy_rate) and str(buy_rate).strip() not in ['None', 'nan', 'NaN', '']) else 0.0
+    sell_val = round(float(sell_rate), 4) if (pd.notna(sell_rate) and str(sell_rate).strip() not in ['None', 'nan', 'NaN', '']) else 0.0
+    
+    qty_str = f"{qty_val:.4f}"
+    buy_str = f"{buy_val:.4f}"
+    sell_str = f"{sell_val:.4f}"
     
     ent_str = ''
-    if pd.notna(entered) and str(entered).strip() not in ['None', 'nan', 'NaN', 'NaT', '<NA>', '']:
+    if pd.notna(entered_date) and str(entered_date).strip() not in ['None', 'nan', 'NaN', 'NaT', '<NA>', '']:
         try:
-            ent_str = pd.to_datetime(entered).strftime('%Y-%m-%d')
+            ent_str = pd.to_datetime(entered_date).strftime('%Y-%m-%d')
         except Exception:
-            ent_str = str(entered).strip()
+            ent_str = str(entered_date).strip()
             
     ext_str = ''
-    if pd.notna(exited) and str(exited).strip() not in ['None', 'nan', 'NaN', 'NaT', '<NA>', '']:
+    if pd.notna(exited_date) and str(exited_date).strip() not in ['None', 'nan', 'NaN', 'NaT', '<NA>', '']:
         try:
-            ext_str = pd.to_datetime(exited).strftime('%Y-%m-%d')
+            ext_str = pd.to_datetime(exited_date).strftime('%Y-%m-%d')
         except Exception:
-            ext_str = str(exited).strip()
+            ext_str = str(exited_date).strip()
             
-    return f"{seg_str}|{sym_str}|{strk_str}|{ent_str}|{ext_str}"
+    return f"{sym_str}-{seg_str}-{strk_str}-{qty_str}-{buy_str}-{sell_str}-{ent_str}-{ext_str}"
 
 def save_to_trademaster(df: pd.DataFrame):
     if df.empty:
         return 0, 0
         
     client = init_connection()
-    keys = ['Segment', 'Symbol', 'StrikePrice', 'EnteredDate', 'ExitedDate']
-    select_cols = ['id'] + keys + ['Qty', 'BuyRate', 'SellRate']
+    select_cols = ['id', 'Symbol', 'Segment', 'StrikePrice', 'Qty', 'BuyRate', 'SellRate', 'EnteredDate', 'ExitedDate']
     
     all_existing_data = []
     limit = 1000
@@ -65,86 +72,80 @@ def save_to_trademaster(df: pd.DataFrame):
         else:
             break
 
-    # Group existing DB data by composite key to handle duplicates
-    existing_key_map = {}
-    duplicate_ids_to_delete = []
-
+    # Build composite key set for all existing records fetched from TradeMaster database table
+    existing_db_keys = set()
     if all_existing_data:
         for row in all_existing_data:
-            k = make_key(row.get('Segment'), row.get('Symbol'), row.get('StrikePrice'), row.get('EnteredDate'), row.get('ExitedDate'))
-            if k not in existing_key_map:
-                existing_key_map[k] = row
-            else:
-                # Mark excess duplicate row for cleanup
-                duplicate_ids_to_delete.append(row['id'])
-
-    # Clean up duplicate rows in Supabase if any exist
-    if duplicate_ids_to_delete:
-        chunk_size = 500
-        for i in range(0, len(duplicate_ids_to_delete), chunk_size):
-            chunk = duplicate_ids_to_delete[i:i+chunk_size]
-            client.table("TradeMaster").delete().in_('id', chunk).execute()
+            k = make_full_trade_key(
+                row.get('Symbol'),
+                row.get('Segment'),
+                row.get('StrikePrice'),
+                row.get('Qty'),
+                row.get('BuyRate'),
+                row.get('SellRate'),
+                row.get('EnteredDate'),
+                row.get('ExitedDate')
+            )
+            existing_db_keys.add(k)
 
     records_to_insert = []
-    records_to_update = []
+    seen_in_batch = set()
 
     for idx, row in df.iterrows():
-        k = make_key(row.get('Segment'), row.get('Symbol'), row.get('StrikePrice'), row.get('EnteredDate'), row.get('ExitedDate'))
+        k = make_full_trade_key(
+            row.get('Symbol'),
+            row.get('Segment'),
+            row.get('StrikePrice'),
+            row.get('Qty'),
+            row.get('BuyRate'),
+            row.get('SellRate'),
+            row.get('EnteredDate'),
+            row.get('ExitedDate')
+        )
         
-        qty = round(float(row.get('Qty', 0) or 0), 4)
-        buy_rate = round(float(row.get('BuyRate', 0) or 0), 4)
-        sell_rate = round(float(row.get('SellRate', 0) or 0), 4)
-        
-        entered_raw = row.get('EnteredDate')
-        exited_raw = row.get('ExitedDate')
+        # Insert only keys which are not matching database keys (and not duplicate within current upload batch)
+        if k not in existing_db_keys and k not in seen_in_batch:
+            seen_in_batch.add(k)
+            
+            qty = round(float(row.get('Qty', 0) or 0), 4)
+            buy_rate = round(float(row.get('BuyRate', 0) or 0), 4)
+            sell_rate = round(float(row.get('SellRate', 0) or 0), 4)
+            
+            entered_raw = row.get('EnteredDate')
+            exited_raw = row.get('ExitedDate')
 
-        entered_date = None
-        if pd.notna(entered_raw) and str(entered_raw).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
-            try:
-                entered_date = pd.to_datetime(entered_raw).strftime('%Y-%m-%d')
-            except Exception:
-                entered_date = str(entered_raw).strip()
+            entered_date = None
+            if pd.notna(entered_raw) and str(entered_raw).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
+                try:
+                    entered_date = pd.to_datetime(entered_raw).strftime('%Y-%m-%d')
+                except Exception:
+                    entered_date = str(entered_raw).strip()
 
-        exited_date = None
-        if pd.notna(exited_raw) and str(exited_raw).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
-            try:
-                exited_date = pd.to_datetime(exited_raw).strftime('%Y-%m-%d')
-            except Exception:
-                exited_date = str(exited_raw).strip()
-        
-        symbol = str(row.get('Symbol')).strip().upper() if pd.notna(row.get('Symbol')) and str(row.get('Symbol')).strip().upper() not in ['NONE', 'NAN', ''] else None
-        strike = str(row.get('StrikePrice')).strip().upper() if pd.notna(row.get('StrikePrice')) and str(row.get('StrikePrice')).strip().upper() not in ['NONE', 'NAN', ''] else None
-        segment = str(row.get('Segment')).strip() if pd.notna(row.get('Segment')) and str(row.get('Segment')).strip() not in ['NONE', 'NAN', ''] else None
+            exited_date = None
+            if pd.notna(exited_raw) and str(exited_raw).strip() not in ['None', 'nan', 'NaN', 'NaT', '']:
+                try:
+                    exited_date = pd.to_datetime(exited_raw).strftime('%Y-%m-%d')
+                except Exception:
+                    exited_date = str(exited_raw).strip()
+            
+            symbol = str(row.get('Symbol')).strip().upper() if pd.notna(row.get('Symbol')) and str(row.get('Symbol')).strip().upper() not in ['NONE', 'NAN', ''] else None
+            strike = str(row.get('StrikePrice')).strip().upper() if pd.notna(row.get('StrikePrice')) and str(row.get('StrikePrice')).strip().upper() not in ['NONE', 'NAN', ''] else None
+            segment = str(row.get('Segment')).strip() if pd.notna(row.get('Segment')) and str(row.get('Segment')).strip() not in ['NONE', 'NAN', ''] else None
 
-        rec_dict = {
-            'Segment': segment,
-            'Symbol': symbol,
-            'StrikePrice': strike,
-            'Qty': qty,
-            'BuyRate': buy_rate,
-            'EnteredDate': entered_date,
-            'SellRate': sell_rate,
-            'ExitedDate': exited_date
-        }
-        rec_dict = _clean_record_dict(rec_dict)
-
-        if k not in existing_key_map:
+            rec_dict = {
+                'Symbol': symbol,
+                'Segment': segment,
+                'StrikePrice': strike,
+                'Qty': qty,
+                'BuyRate': buy_rate,
+                'SellRate': sell_rate,
+                'EnteredDate': entered_date,
+                'ExitedDate': exited_date
+            }
+            rec_dict = _clean_record_dict(rec_dict)
             records_to_insert.append(rec_dict)
-            # Add to local map so subsequent identical rows in the same batch don't double insert
-            existing_key_map[k] = rec_dict
-        else:
-            existing_row = existing_key_map[k]
-            if 'id' in existing_row:
-                ex_qty = round(float(existing_row.get('Qty', 0) or 0), 4)
-                ex_buy = round(float(existing_row.get('BuyRate', 0) or 0), 4)
-                ex_sell = round(float(existing_row.get('SellRate', 0) or 0), 4)
-                
-                if abs(qty - ex_qty) > 1e-4 or abs(buy_rate - ex_buy) > 1e-4 or abs(sell_rate - ex_sell) > 1e-4:
-                    record_id = existing_row['id']
-                    records_to_update.append((record_id, rec_dict))
 
     inserted = 0
-    updated = 0
 
     # Bulk insert chunks of 500
     if records_to_insert:
@@ -154,13 +155,7 @@ def save_to_trademaster(df: pd.DataFrame):
             client.table("TradeMaster").insert(chunk).execute()
             inserted += len(chunk)
 
-    # Update modified records
-    if records_to_update:
-        for rec_id, update_dict in records_to_update:
-            client.table("TradeMaster").update(update_dict).eq('id', rec_id).execute()
-            updated += 1
-
-    return inserted, updated
+    return inserted, 0
 
 def save_to_charges(df: pd.DataFrame):
     if df.empty:
