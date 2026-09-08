@@ -10,6 +10,7 @@ st.set_page_config(
 performance_page = st.Page("pages/Performance.py", title="Performance", icon="📈", default=True)
 tax_page = st.Page("pages/Tax.py", title="Tax", icon="📝")
 calculator_page = st.Page("pages/Calculator.py", title="Calculator", icon="🧮")
+fyers_tradebook_page = st.Page("pages/FyersTradebook.py", title="Fyers Tradebook", icon="📄")
 
-pg = st.navigation([performance_page, tax_page, calculator_page])
+pg = st.navigation([performance_page, tax_page, calculator_page, fyers_tradebook_page])
 pg.run()
