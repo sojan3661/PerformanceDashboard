@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🧮 Payout & P&L Calculator")
-st.markdown("Calculate payout allocations based on net P&L after charges for selected Financial Years and Months.")
+st.markdown("Calculate payout allocations based on net P&L after charges for selected Financial Years, Months, and Segments.")
 st.divider()
 
 # Load processed data
@@ -34,13 +34,18 @@ FY_MONTH_ORDER = [
     "January", "February", "March"
 ]
 
-# Extract available FYs and Months
+# Extract available FYs, Months, and Segments
 available_fys = sorted([str(fy) for fy in trade_df['FY'].dropna().unique() if str(fy).strip()])
 fy_options = ["All FY"] + available_fys
 
+if 'Segment' in trade_df.columns:
+    segment_options = sorted([str(seg) for seg in trade_df['Segment'].dropna().unique() if str(seg).strip()])
+else:
+    segment_options = []
+
 # Filters Section
-st.header("1. Select Period")
-col_fy, col_month = st.columns(2)
+st.header("1. Select Period & Segment")
+col_fy, col_month, col_segment = st.columns(3)
 
 with col_fy:
     selected_fy = st.selectbox(
@@ -66,10 +71,21 @@ with col_month:
         key="calc_selected_month"
     )
 
-# Apply Month filter
+with col_segment:
+    selected_segment = st.multiselect(
+        "Filter by Segment",
+        options=segment_options,
+        default=segment_options,
+        key="calc_selected_segment"
+    )
+
+# Apply Month and Segment filter
 filtered_df = filtered_by_fy.copy()
 if selected_month != "All Months":
     filtered_df = filtered_df[filtered_df['Month'] == selected_month]
+
+if 'Segment' in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df['Segment'].astype(str).isin(selected_segment)]
 
 # Calculate Net P&L metrics for selected period
 trade_count = len(filtered_df)
@@ -196,4 +212,8 @@ if calculate_clicked or "has_calculated" in st.session_state:
             st.warning(f"⚠️ Total allocated percentage ({total_allocated_pct:.2f}%) exceeds 100%. Total payout exceeds net P&L.")
             
     else:
-        st.warning(f"⚠️ Net P&L after charge for selected period ({selected_fy}, {selected_month}) is **₹ {net_pl_after_charge:,.2f}**.\n\nSince Net P&L after charge is not positive (<= 0), no payout table is generated.")
+        filter_desc = f"{selected_fy}, {selected_month}"
+        if 'Segment' in trade_df.columns and len(selected_segment) < len(segment_options):
+            seg_str = ", ".join(selected_segment) if selected_segment else "None"
+            filter_desc += f", Segment: [{seg_str}]"
+        st.warning(f"⚠️ Net P&L after charge for selected period/segment ({filter_desc}) is **₹ {net_pl_after_charge:,.2f}**.\n\nSince Net P&L after charge is not positive (<= 0), no payout table is generated.")
