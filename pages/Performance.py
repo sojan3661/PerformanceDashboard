@@ -144,12 +144,44 @@ drilldown_segment_options = []
 if not cached_trades.empty and 'Segment' in cached_trades.columns:
     drilldown_segment_options = sorted([str(x) for x in cached_trades['Segment'].dropna().unique().tolist()])
 
-selected_drilldown_segment = st.multiselect(
-    "Filter by Segment", 
-    options=drilldown_segment_options, 
-    default=drilldown_segment_options,
-    key="drilldown_segment_filter"
-)
+col_filter_dd1, col_filter_dd2 = st.columns(2)
+
+with col_filter_dd1:
+    selected_drilldown_segment = st.multiselect(
+        "Filter by Segment", 
+        options=drilldown_segment_options, 
+        default=drilldown_segment_options,
+        key="drilldown_segment_filter"
+    )
+
+# Filter trades based on selected segment to get valid symbol options
+symbol_source_df = cached_trades.copy()
+if not symbol_source_df.empty and 'Segment' in symbol_source_df.columns and selected_drilldown_segment:
+    symbol_source_df = symbol_source_df[symbol_source_df['Segment'].astype(str).isin(selected_drilldown_segment)]
+
+drilldown_symbol_options = []
+if not symbol_source_df.empty and 'Symbol' in symbol_source_df.columns:
+    drilldown_symbol_options = sorted([str(x) for x in symbol_source_df['Symbol'].dropna().unique().tolist()])
+
+# Maintain session state sync when segment selection changes
+current_seg_set = set(selected_drilldown_segment) if selected_drilldown_segment else set()
+prev_seg_set = st.session_state.get("prev_drilldown_segment_set")
+
+if prev_seg_set != current_seg_set:
+    st.session_state["drilldown_symbol_filter"] = drilldown_symbol_options
+    st.session_state["prev_drilldown_segment_set"] = current_seg_set
+elif "drilldown_symbol_filter" in st.session_state:
+    st.session_state["drilldown_symbol_filter"] = [
+        s for s in st.session_state["drilldown_symbol_filter"] if s in drilldown_symbol_options
+    ]
+
+with col_filter_dd2:
+    selected_drilldown_symbol = st.multiselect(
+        "Filter by Symbol",
+        options=drilldown_symbol_options,
+        default=drilldown_symbol_options if "drilldown_symbol_filter" not in st.session_state else None,
+        key="drilldown_symbol_filter"
+    )
 
 drilldown_df = cached_trades.copy()
 if not drilldown_df.empty:
@@ -161,6 +193,9 @@ else:
 
 if not drilldown_df.empty and 'Segment' in drilldown_df.columns and selected_drilldown_segment:
     drilldown_df = drilldown_df[drilldown_df['Segment'].astype(str).isin(selected_drilldown_segment)]
+
+if not drilldown_df.empty and 'Symbol' in drilldown_df.columns and selected_drilldown_symbol is not None:
+    drilldown_df = drilldown_df[drilldown_df['Symbol'].astype(str).isin(selected_drilldown_symbol)]
 
 
 FY_MONTH_ORDER = [

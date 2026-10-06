@@ -11,6 +11,8 @@ performance_page = st.Page("pages/Performance.py", title="Performance", icon="�
 tax_page = st.Page("pages/Tax.py", title="Tax", icon="📝")
 calculator_page = st.Page("pages/Calculator.py", title="Calculator", icon="🧮")
 fyers_tradebook_page = st.Page("pages/FyersTradebook.py", title="Fyers Tradebook", icon="📄")
+notes_page = st.Page("pages/Notes.py", title="Notes", icon="📌")
 
-pg = st.navigation([performance_page, tax_page, calculator_page, fyers_tradebook_page])
+pg = st.navigation([performance_page, tax_page, calculator_page, fyers_tradebook_page, notes_page])
 pg.run()
+

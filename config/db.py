@@ -871,6 +871,69 @@ def prepare_and_insert_migrated_fyers_data(transformed_df: pd.DataFrame):
         return True, "All trades were already present in TradeMaster database (0 new records added)."
 
 
+def format_tags(raw_tags) -> str:
+    """Format raw tags separated by spaces or semicolons into a normalized semicolon-separated string."""
+    if not raw_tags or pd.isna(raw_tags) or not str(raw_tags).strip():
+        return ""
+    import re
+    tokens = [t.strip() for t in re.split(r'[\s;]+', str(raw_tags)) if t.strip()]
+    return "; ".join(tokens)
+
+def fetch_image_data() -> pd.DataFrame:
+    """Fetch all records from Image_Data table."""
+    client = init_connection()
+    response = client.table("Image_Data").select("*").order("Id", desc=True).execute()
+    data = response.data
+    if data:
+        df = pd.DataFrame(data)
+        return df
+    else:
+        return pd.DataFrame(columns=["Id", "Note", "ImagePath", "Date", "Repeat", "Solution", "Tags"])
+
+def save_to_image_data(note: str = None, image_path: str = None, note_date = None, repeat_val: int = 0, solution: str = None, tags: str = None):
+    """Insert a new note record into Image_Data table."""
+    client = init_connection()
+    formatted_tags = format_tags(tags)
+    rec = {
+        "Note": note if note else None,
+        "ImagePath": image_path if image_path else None,
+        "Date": str(note_date) if note_date else None,
+        "Repeat": int(repeat_val) if repeat_val is not None else 0,
+        "Solution": solution if solution else None,
+        "Tags": formatted_tags if formatted_tags else None
+    }
+    cleaned_rec = _clean_record_dict(rec)
+    res = client.table("Image_Data").insert(cleaned_rec).execute()
+    return res
+
+def delete_image_data(note_id: int):
+    """Delete a note record by Id from Image_Data table."""
+    client = init_connection()
+    res = client.table("Image_Data").delete().eq("Id", note_id).execute()
+    return res
+
+def update_image_data(note_id: int, note: str = None, image_path: str = None, note_date = None, repeat_val: int = None, solution: str = None, tags: str = None):
+    """Update an existing note record by Id in Image_Data table."""
+    client = init_connection()
+    rec = {}
+    if note is not None:
+        rec["Note"] = note
+    if image_path is not None:
+        rec["ImagePath"] = image_path
+    if note_date is not None:
+        rec["Date"] = str(note_date)
+    if repeat_val is not None:
+        rec["Repeat"] = int(repeat_val)
+    if solution is not None:
+        rec["Solution"] = solution
+    if tags is not None:
+        rec["Tags"] = format_tags(tags)
+    cleaned_rec = _clean_record_dict(rec)
+    res = client.table("Image_Data").update(cleaned_rec).eq("Id", note_id).execute()
+    return res
+
+
+
 
 
 
